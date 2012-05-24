@@ -1,6 +1,6 @@
 <?php if (!defined('BASEPATH')) exit('No direct script access allowed');
 
-	class Auth extends CI_Controller
+	class Auth extends MY_Controller
 	{
 
 		protected $verify_url;
@@ -14,19 +14,6 @@
 
 			$this->config->load('logrus_auth');
 			$this->load->library('logrus_auth');
-
-			if ($this->logrus_auth->logged_in())
-			{
-				$display = $this->logrus_auth->member->display_name == '' ? $this->logrus_auth->member->email : $this->logrus_auth->member->display_name;
-				$this->template->add_menu_item('member', '/auth/change_password', '<i class="icon-lock"> </i> Change Password');
-				$this->template->add_menu_item('member', '', '<hr />');
-				$this->template->add_menu_item('member', '/auth/logout', '<i class="icon-off"> </i> Log Out');
-			}
-			else
-			{
-				$this->template->add_menu_item('alt', '/auth/login', 'Log In');
-			}
-
 		}
 
 		function index()
@@ -35,11 +22,65 @@
 			redirect('/');
 		}
 
+		function oauth2_session($provider = 'select')
+		{
+
+			$this->layout = FALSE;
+			$this->view = FALSE;
+
+			if ($provider == 'select')
+			{
+				redirect('/auth/login');
+			}
+			$this->load->library('logrus_auth');
+			$who = $provider;
+
+			$this->load->helper('url');
+			$this->load->library('oauth2');
+			$auth_access = $this->config->item('auth_access');
+			$client_id = $auth_access[$who]['client_id'];
+			$client_secret = $auth_access[$who]['client_secret'];
+
+			$provider = $this->oauth2->provider($provider, array(
+				'id' => $client_id,
+				'secret' => $client_secret
+			));
+
+			if (! $this->input->get('code'))
+			{
+				$provider->authorize();
+			}
+			else
+			{
+				try
+				{
+					$token = $provider->access($_GET['code']);
+					$user = $provider->get_user_info($token);
+					// log him in, if not a member, and auth_open_enrollment, create account.
+					$this->logrus_auth->oauth2_member_login($provider->name, $token, $user);
+				}
+				catch(OAuth2_Exception $e)
+				{
+					show_error('That didnt work '.$e);
+				}
+			}
+		}
+
+		/**
+		 * so sorry, not for you.
+		 */
+		function site_closed()
+		{
+
+		}
 		/**
 		 * Receives a POST with parameter email to check if a user is registered, returns json response
 		 */
 		function ajax_email_exists()
 		{
+			$this->layout = FALSE;
+			$this->view   = FALSE;
+
 			$this->load->model('logrus/member');
 
 			$email  = strtolower(trim($this->input->post('email')));
@@ -61,6 +102,9 @@
 		 */
 		function ajax_login()
 		{
+			$this->layout = FALSE;
+			$this->view   = FALSE;
+
 			$this->load->model('logrus/member');
 			$this->load->library('logrus_auth');
 
@@ -87,10 +131,14 @@
 			echo json_encode($response);
 		}
 
+		function login()
+		{
+			$this->load->helper('form');
+		}
 		/**
 		 * login url
 		 */
-		function login()
+		function login_form()
 		{
 			$this->load->library('form_validation');
 			$is_ajax    = $this->input->is_ajax_request();
@@ -155,6 +203,8 @@
 
 			if ($is_ajax)
 			{
+				$this->layout = FALSE;
+				$this->view   = FALSE;
 				if ($ajax_error)
 				{
 					echo json_encode($message);
@@ -166,10 +216,10 @@
 			}
 			else
 			{
-				$config['content'] = $message;
-				$this->template->render($config);
 			}
 
+			$this->data['content'] = $message;
+			$this->view            = 'layouts/wrapper';
 		}
 
 		/**
@@ -239,10 +289,10 @@
 					{
 						$insert = $this->member->insert(
 							array(
-								 'email'        => $email,
-								 'created'      => date('Y-m-d H:i:s'),
-								 'display_name' => $variables['display_name'],
-								 'active'       => 1
+								'email'        => $email,
+								'created'      => date('Y-m-d H:i:s'),
+								'display_name' => $variables['display_name'],
+								'active'       => 1
 							)
 						);
 						if ($insert)
@@ -277,11 +327,11 @@
 			}
 			else
 			{
-				//load view here, or render if using a template library
-				$config['content'] = $message;
+				$this->data['content'] = $message;
+				$this->view            = 'layouts/wrapper';
+
 				$this->template->add_script('cookie.js');
 				$this->template->add_script('auth/signup_form.js');
-				$this->template->render($config);
 			}
 		}
 
@@ -304,7 +354,8 @@
 			{
 				$message = $this->load->view('email_not_confirmed');
 			}
-			$this->template->render($message);
+			$this->data['content'] = $message;
+			$this->view            = 'layouts/wrapper';
 		}
 
 		/**
@@ -372,6 +423,9 @@
 
 			if ($is_ajax)
 			{
+				$this->view   = FALSE;
+				$this->layout = FALSE;
+
 				if ($ajax_error)
 				{
 					echo json_encode($message);
@@ -383,15 +437,14 @@
 			}
 			else
 			{
-				//load view here, or render if using a template library
-				$config['content'] = $message;
 				$this->template->add_script('auth/confirm_email.js');
-				$this->template->render($config);
+				$this->data['content'] = $message;
+				$this->view            = 'layouts/wrapper';
 			}
 		}
 
 		/**
-		 * logout of the site
+		 * logout of the site.  Redirects to url in logrus_auth config for logged out users
 		 */
 		function logout()
 		{
@@ -425,7 +478,6 @@
 							 'label' => 'Confirm new password',
 							 'rules' => 'required');
 
-			// load any variables to refill the form
 			$variables['code']     = $reset_code;
 			$variables['password'] = $this->input->post('password', TRUE);
 			$variables['confirm']  = $this->input->post('confirm', TRUE);
@@ -466,6 +518,9 @@
 
 			if ($is_ajax)
 			{
+				$this->layout = FALSE;
+				$this->view   = FALSE;
+
 				if ($ajax_error)
 				{
 					echo json_encode($message);
@@ -477,9 +532,9 @@
 			}
 			else
 			{
-				$config['content'] = $message;
 				$this->template->add_script('password_reset.js');
-				$this->template->render($config);
+				$this->data['content'] = $message;
+				$this->view            = 'layouts/wrapper';
 			}
 		}
 
@@ -533,9 +588,11 @@
 					$message = $this->msg->block('Please check your email for a password reset email from us with further instructions.');
 				}
 			}
-			// this is where you display results.  javascript version or full template version
+
 			if ($is_ajax)
 			{
+				$this->layout = FALSE;
+				$this->view   = FALSE;
 				if ($ajax_error)
 				{
 					echo json_encode($message);
@@ -547,11 +604,9 @@
 			}
 			else
 			{
-				//load view here, or render if using a template library
-				$config['content'] = $message;
-
 				$this->template->add_script('auth/reset_password.js');
-				$this->template->render($config);
+				$this->data['content'] = $message;
+				$this->view            = 'layouts/wrapper';
 			}
 
 		}
@@ -629,11 +684,12 @@
 						$message .= $this->load->view('auth/change_password', $variables, TRUE);
 					}
 				}
-				// this is where you display results.  javascript version or full template version
 			}
 
 			if ($is_ajax)
 			{
+				$this->layout = FALSE;
+				$this->view   = FALSE;
 				if ($ajax_error)
 				{
 					echo json_encode($message);
@@ -645,10 +701,10 @@
 			}
 			else
 			{
-				$config['content'] = $message;
 				$this->template->add_script('cookie.js');
 				$this->template->add_script('auth_change_password.js');
-				$this->template->render($config);
+				$this->data['content'] = $message;
+				$this->view            = 'layouts/wrapper';
 			}
 		}
 	}
