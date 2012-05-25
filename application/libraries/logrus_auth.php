@@ -36,7 +36,6 @@
 		function __construct()
 		{
 			$this->ci = & get_instance();
-
 			$this->ci->load->config('logrus_auth');
 			$this->ci->load->library('session');
 			$this->ci->load->helper('url');
@@ -850,7 +849,7 @@
 				}
 				else
 				{
-					$this->ci->member->update($memeber->id, array('display_name' => $user_fields['email']));
+					$this->ci->member->update($member->id, array('display_name' => $user_fields['email']));
 				}
 			}
 		}
