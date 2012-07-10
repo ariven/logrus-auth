@@ -268,6 +268,7 @@
 			$this->message = 'NOT logged in'; // assume the worst
 			$valid         = FALSE;
 
+
 			$email = strtolower(trim($this->ci->session->userdata($this->session_username)));
 
 			$session_id = $this->ci->session->userdata($this->session_id);
@@ -825,9 +826,7 @@
 		function oauth2_update_member($provider_name, $token, $user_fields)
 		{
 			$member = $this->member_by_email($user_fields['email']);
-			$this->ci->member->update($member->id, array('oauth2_token'    => $token->access_token,
-														 'oauth2_uid'      => $user_fields['uid'],
-														 'login_authority' => $provider_name));
+			$this->ci->member->update($member->id, array('login_authority' => $provider_name));
 
 			if (!$this->get_profile_field($member->id, 'profile_picture'))
 			{
@@ -878,7 +877,6 @@
 					// make an account, log them in
 					$this->create_member($user_fields['email'], $user_fields['name']);
 					$member = $this->member_by_email($user_fields['email']);
-					$this->ci->lg->info('Created new member via OAuth2 and provider ' . $provider_name);
 				}
 				else
 				{
