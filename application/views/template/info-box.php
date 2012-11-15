@@ -1,0 +1,1 @@
+<div class="alert alert-info"><?php if(isset($content)) { echo $content; } ?></div>

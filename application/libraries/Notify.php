@@ -12,6 +12,7 @@
 		{
 			$this->ci = & get_instance();
 			$this->config->load('notify');
+			$this->load->model('lg');
 		}
 
 		/**
@@ -130,6 +131,12 @@
 				$data['bcc'] = $bcc;
 			}
 			$response = $this->rest->put('new', $data);
+			if (isset($response['status']) and $response['status'] == 'failed')
+			{
+
+				$this->lg->error('Notify failed, reason: %s', $response['message']);
+			}
+
 			return $response;
 		}
 

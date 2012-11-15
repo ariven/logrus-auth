@@ -1,7 +1,7 @@
 <?php
 
 	$config['auth_open_enrollment']     = TRUE; // if TRUE, will allow to create accounts, otherwise, will tell them no
-	$config['auth_site_key']            = ''; // sitewide key
+	$config['auth_use_oauth2']          = FALSE;
 	$config['auth_login_url']           = '/'; // URL to send to if not logged in
 	$config['auth_logged_in_url']       = '/'; // url to send to after logging in
 	$config['auth_failed_count']        = 20; // attempts to allow before locking account
@@ -15,11 +15,11 @@
 	$config['auth_password_reset_expires'] = 60 * 60 * 24 * 3; // 3 days to keep reset before expiring
 
 	$config['auth_create_default_group'] = TRUE;
-	$config['auth_default_group'] = 'members';
+	$config['auth_default_group']        = 'members';
 
-	$config['auth_profile_image_directory'] = FCPATH.'/assets/images/profile'; // where profile images are stored, no trailing slash, will also end up with a subdir /thumb
+	$config['auth_profile_image_directory'] = FCPATH . '/assets/images/profile'; // where profile images are stored, no trailing slash, will also end up with a subdir /thumb
 
-	$config['auth_table_prefix'] = 'logrus_';
+	$config['auth_table_prefix'] = ''; // default table prefix
 
 	/**
 	 * names of the individual tables
@@ -29,7 +29,7 @@
 	$config['auth_tables']['member_groups']   = 'member_groups'; // groups a user is in
 	$config['auth_tables']['failed_logins']   = 'failed_logins'; // failed login tracking
 	$config['auth_tables']['members']         = 'members'; // user master table
-	$config['auth_tables']['sessions']        = 'sessions'; // user sessions
+	$config['auth_tables']['sessions']        = 'session_auth'; // user sessions
 	$config['auth_tables']['profiles']        = 'profiles'; // configurable metadata table
 
 // https://code.google.com/apis/console to get your keys

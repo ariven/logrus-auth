@@ -1,4 +1,4 @@
-<?php if (!defined('BASEPATH')) exit('No direct script access allowed');
+<?php if (!defined('BASEPATH')) { exit('No direct script access allowed'); }
 
 
 	class Password_resets extends MY_Model
@@ -7,9 +7,9 @@
 		{
 			parent::__construct();
 			$this->load->config('logrus_auth');
-			$prefix       = $this->config->item('auth_table_prefix');
-			$this->_table = $prefix . 'password_resets';
+			$tables = $this->config->item('auth_tables');
+			$prefix = $this->config->item('auth_table_prefix');
 
+			$this->_table = $prefix . $tables['password_resets'];
 		}
-
 	}

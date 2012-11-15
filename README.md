@@ -16,9 +16,7 @@ I modified the windowslive provider to also return the users email address, sinc
 
 The example Auth controller uses the base controller by Jamie Rumbelow found here:
 https://github.com/jamierumbelow/codeigniter-base-controller
-
 instead of my own templating system.  I have adjusted the sample views as well.
-
 
 Example auth controller included, the main library that does the grunt work is logrus_auth.
 
@@ -33,9 +31,13 @@ Included is sql for mysql.  You will need to edit table names if you intend to u
 I will update this with better documentation when I get a chance, but for now check the controllers/auth.php
 file to see how I use it.
 
-passwords are a sha512 hash of the plaintext password, a salt, and optionally a sitewide salt.
+Passwords are generated with the PBKDF2 method, as described here: https://defuse.ca/php-pbkdf2.htm and are set
+to default to 1000 iterations and sha256 for the hash generation.
 
-The current way that the sessions work, is single log in.  If you log in somewhere else, it logs you out 
+These defaults can be changed in the pbkdf2 config file, and changing these constants will not affect existing pbkdf2
+style passwords in your database.
+
+The current way that the sessions work, is single log in.  If you log in somewhere else, it logs you out
 of the first session.  This is on my @todo list to change at a later date.
 
 Currently it should support the config option to not allow creation of account when an unknown oauth2 person tries to log in.
@@ -57,3 +59,10 @@ Be warned, only allow Facebook logins if you feel that you can trust them as an 
 they are not an email address provider like windows live and gmail are.  This means that in theory someone could
 hijack an account if you are not careful.
 
+- Changed password hash to use the PBKDF2 method.  This is change is not compatible with the old method of handling
+password and hashes, it requires a change to the table structure and a different method of handling the salt.  This
+change though allows you to fine tune your password hash generation to increase security over time without forcing
+ users (of this algorithm) to redo their passwords.
+
+- Created install controller that will create the tables and foreign keys needed.  This is experimental.  This also
+changes the structure of several of the tables, so it is an all or nothing thing.

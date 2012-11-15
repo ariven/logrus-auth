@@ -1,7 +1,9 @@
 <?php
 
 	if (!defined('BASEPATH'))
+	{
 		exit('No direct script access allowed');
+	}
 
 	/**
 	 * 2012-04-12 - removed saving url to redirect to if found logged out, was breaking things
@@ -40,6 +42,8 @@
 			$this->ci->load->library('session');
 			$this->ci->load->helper('url');
 			$this->ci->load->library('notify');
+			$this->ci->load->library('pbkdf2');
+			$this->ci->load->model('lg');
 
 			$this->login_page  = strtolower($this->ci->config->item('auth_login_url'));
 			$this->use_ssl     = $this->ci->config->item('auth_use_ssl');
@@ -62,6 +66,7 @@
 			$this->get_member();
 			$this->login_menu();
 			$this->open_enrollment = $this->ci->config->item('open_enrollment');
+
 		}
 
 		/**
@@ -88,6 +93,7 @@
 					}
 				}
 			}
+
 			return $valid;
 		}
 
@@ -162,9 +168,7 @@
 					}
 					else
 					{
-						$hash = $this->hash_password($password, $member->salt);
-
-						if ($member->password == $hash)
+						if ($member->hash == $this->ci->pbkdf2->validate_password($password, $member->hash))
 						{
 							$this->message = 'logged in.';
 						}
@@ -181,7 +185,8 @@
 				$session_id = $this->ci->session->userdata($this->ci->config->item('auth_session_id'));
 				if (!$session_id)
 				{
-					$session_id = $this->hash_password(time(), $member->salt);
+					$this->ci->load->helper('string');
+					$session_id = hash('sha512', random_string('alnum', 128));
 				}
 				$this->update_session($member->id, $session_id);
 				$this->ci->session->set_userdata($this->session_username, $email);
@@ -191,6 +196,7 @@
 				{
 					redirect($this->ci->config->item('auth_logged_in_url'));
 				}
+
 				return TRUE;
 			}
 			else
@@ -201,6 +207,7 @@
 				{
 					$this->increase_fail_count($member->id);
 				}
+
 				return FALSE;
 			}
 		}
@@ -214,10 +221,11 @@
 		 */
 		function member_by_email($email)
 		{
-			$email = filter_var(strtolower(trim($email)));
+			$email = filter_var(strtolower(trim($email)), FILTER_SANITIZE_EMAIL);
 			if ($email)
 			{
 				$member = $this->ci->member->get_by('email', $email);
+
 				return $member;
 			}
 			else
@@ -236,7 +244,8 @@
 
 			$this->member        = array();
 			$this->member_groups = array();
-			$email               = filter_var($this->ci->session->userdata($this->session_username), FILTER_SANITIZE_EMAIL);
+			$email               = filter_var($this->ci->session->userdata($this->session_username),
+											  FILTER_SANITIZE_EMAIL);
 			$this->ci->load->model('logrus/member');
 
 			if ($email)
@@ -251,6 +260,7 @@
 			{
 				$this->member = array();
 			}
+
 			return $this->member;
 		}
 
@@ -308,6 +318,7 @@
 			if (!$valid)
 			{
 				$this->log_out(FALSE);
+
 				return FALSE;
 			}
 			else
@@ -403,7 +414,7 @@
 
 		/**
 		 * @param $member_id member id
-		 * @param $password password to check
+		 * @param $password  password to check
 		 * @return bool
 		 */
 		function password_matches($member_id, $password)
@@ -412,8 +423,7 @@
 			$member = $this->ci->member->get($member_id);
 			if ($member)
 			{
-				$hash = $this->hash_password($password, $member->salt);
-				if ($hash == $member->password)
+				if ($this->ci->pbkdf2->validate_password($password, $member->hash))
 				{
 					return TRUE;
 				}
@@ -425,6 +435,7 @@
 			else
 			{
 				$this->message = 'Member not found';
+
 				return FALSE;
 			}
 		}
@@ -442,11 +453,18 @@
 			$member = $this->ci->member->get($member_id);
 			if ($member)
 			{
-				$salt         = ($member->salt <> '') ? $member->salt : $this->generate_salt();
-				$new_password = $this->hash_password($password, $salt);
-				$this->ci->member->update($member_id, array('password' => $new_password,
-															'salt'     => $salt));
-				return TRUE;
+				$result = $this->ci->member->update(
+					$member_id,
+					array('hash' => $this->ci->pbkdf2->create_hash($password))
+				);
+				if ($result)
+				{
+					return TRUE;
+				}
+				else
+				{
+					return FALSE;
+				}
 			}
 			else
 			{
@@ -468,6 +486,7 @@
 			{
 				return $this->set_password($code->member_id, $password);
 			}
+
 			return FALSE;
 		}
 
@@ -484,18 +503,19 @@
 			$this->ci->load->library('notify');
 
 			// clean up old resets
-			$this->ci->password_resets->delete_by('reset_date <', date('Y-m-d H:i:s', time() - $this->config->item('auth_password_reset_expires')));
+			$this->ci->password_resets->delete_by('reset_date <', date('Y-m-d H:i:s',
+																	   time() - $this->ci->config->item('auth_password_reset_expires')));
 
-			$member = $this->member->get($id);
+			$member = $this->ci->member->get($id);
 			if ($member)
 			{
 				$reset_code = hash('sha1', print_r($member, TRUE) . time());
 				$this->ci->password_resets->delete_by('member_id', $member->id); // clear old resets
 				$this->ci->password_resets->insert(
 					array(
-						'member_id'      => $member->id,
-						'reset_code'     => $reset_code,
-						'reset_date'     => date('Y-m-d H:i:s')
+						 'member_id'  => $member->id,
+						 'reset_code' => $reset_code,
+						 'reset_date' => date('Y-m-d H:i:s')
 					)
 				);
 
@@ -514,35 +534,17 @@
 					$member->email,
 					$member->display_name,
 					$email_subject,
-					$this->ci->load->view($email_view, array('name'       => $member->display_name,
-															 'base_url'   => site_url(),
-															 'reset_code' => $reset_code), TRUE)
+					$this->ci->load->view($email_view, array(
+															'name'       => $member->display_name,
+															'base_url'   => site_url(),
+															'reset_code' => $reset_code
+													   ), TRUE)
 				);
+
 				return $reset_code;
 			}
+
 			return FALSE;
-		}
-
-		/**
-		 * @return string Generates a salt
-		 */
-		public function generate_salt()
-		{
-			$this->ci->load->helper('string');
-			return hash('sha512', time() . random_string('sha1', 40));
-		}
-
-		/**
-		 * Produces a hashed password, using password, salt and site key
-		 *
-		 * @param $password members password
-		 * @param $salt members salt
-		 * @return string
-		 */
-		public function hash_password($password, $salt)
-		{
-			$this->ci->config->load('logrus_auth');
-			return hash('sha512', $password . $salt . $this->ci->config->item('auth_site_key'));
 		}
 
 
@@ -555,6 +557,7 @@
 		public function failed_login_count($id)
 		{
 			$this->ci->load->model('logrus/failed_logins');
+
 			return $this->ci->failed_logins->failed_count($id);
 		}
 
@@ -578,9 +581,9 @@
 		{
 			$this->ci->load->model('logrus/failed_logins');
 			$this->ci->failed_logins->insert(array(
-				'member_id' => $id,
-				'fail_date' => date('Y-m-d H:i:s')
-			));
+												  'member_id' => $id,
+												  'fail_date' => date('Y-m-d H:i:s')
+											 ));
 		}
 
 		// /////////////////////////////////////////////////////////////////
@@ -604,10 +607,10 @@
 			if ($member)
 			{
 				$session_info = array(
-					'ip_address'   => $_SERVER['REMOTE_ADDR'],
-					'last_login'   => date('Y-m-d H:i:s'),
-					'logged_in'    => 1,
-					'member_id'    => $member->id,
+					'ip_address' => $_SERVER['REMOTE_ADDR'],
+					'last_login' => date('Y-m-d H:i:s'),
+					'logged_in'  => 1,
+					'member_id'  => $member->id,
 				);
 				if ($login_authority)
 				{
@@ -661,13 +664,14 @@
 					}
 				}
 			}
+
 			return FALSE;
 		}
 
 		/**
 		 * confirms if the given session id is valid for the user.
 		 *
-		 * @param $member_id member id
+		 * @param $member_id  member id
 		 * @param $session_id session id
 		 * @return bool
 		 */
@@ -690,6 +694,7 @@
 					}
 				}
 			}
+
 			return FALSE;
 		}
 
@@ -720,6 +725,7 @@
 		function member_profile($id)
 		{
 			$this->ci->load->model('logrus/profile');
+
 			return $this->ci->profile->get_by('member_id', $id);
 		}
 
@@ -736,8 +742,10 @@
 			$profile = $this->member_profile($id);
 			if (!$profile)
 			{
-				$this->ci->profile->insert(array('member_id' => $id,
-												 $which      => $what));
+				$this->ci->profile->insert(array(
+												'member_id' => $id,
+												$which      => $what
+										   ));
 			}
 			else
 			{
@@ -757,6 +765,7 @@
 					return $profile->$which;
 				}
 			}
+
 			return '';
 		}
 
@@ -764,12 +773,14 @@
 		function create_member($email, $name)
 		{
 			$this->ci->load->model('logrus/member');
+			$this->ci->load->helper('string');
 			$success = TRUE;
 
 			$result = $this->ci->member->insert(array(
-				'email'        => strtolower(trim($email)),
-				'display_name' => trim($name)
-			));
+													 'email'        => strtolower(trim($email)),
+													 'display_name' => trim($name),
+													 'hash' => $this->ci->pbkdf2->create_hash(random_string('alnum', 128))
+												));
 			if ($result)
 			{
 				if ($this->ci->config->item('auth_create_default_group'))
@@ -778,9 +789,9 @@
 					$this->ci->load->model('logrus/member_groups');
 					$group        = $this->ci->groups->get_by('tag', $this->ci->config->item('auth_default_group'));
 					$group_result = $this->ci->member_groups->insert(array(
-						'group_id'  => $group->id,
-						'member_id' => $result
-					));
+																		  'group_id'  => $group->id,
+																		  'member_id' => $result
+																	 ));
 					if (!$group_result)
 					{
 						$this->ci->lg->error('Failed to create default group for member ' . $result);
@@ -791,6 +802,7 @@
 			{
 				$success = FALSE;
 			}
+
 			return $success;
 		}
 
@@ -808,6 +820,7 @@
 			if ($uid)
 			{
 				$member = $this->ci->member->get_by('oauth2_uid', $uid);
+
 				return $member;
 			}
 			else
@@ -820,8 +833,8 @@
 		 * Updates member fields with new stuff, i.e. image, provider, etc
 		 *
 		 * @param $provider_name name of provider
-		 * @param $token provided by oauth2 library
-		 * @param $user_fields provided by oauth2 library
+		 * @param $token         provided by oauth2 library
+		 * @param $user_fields   provided by oauth2 library
 		 */
 		function oauth2_update_member($provider_name, $token, $user_fields)
 		{
@@ -864,8 +877,8 @@
 		 * Your acceptance level of risk should dictate who you set up as a provider.
 		 *
 		 * @param $provider_name name of provider
-		 * @param $token provided by oauth2 library
-		 * @param $user_fields provided by oauth2 library
+		 * @param $token         provided by oauth2 library
+		 * @param $user_fields   provided by oauth2 library
 		 */
 		function oauth2_member_login($provider_name, $token, $user_fields, $skip_redirect = FALSE)
 		{
@@ -891,7 +904,7 @@
 				$session_id = $this->ci->session->userdata($this->ci->config->item('auth_session_id'));
 				if (!$session_id)
 				{
-					$session_id = $this->hash_password(time(), $member->salt . $this->ci->config->item('auth_site_key') . mt_rand());
+					$session_id = hash('sha512', random_string('alnum', 128));
 				}
 				$this->update_session($member->id, $session_id);
 				$this->ci->session->set_userdata($this->session_username, $user_fields['email']);
@@ -901,6 +914,7 @@
 				{
 					redirect($this->ci->config->item('auth_logged_in_url'));
 				}
+
 				return TRUE;
 			}
 			else
@@ -909,6 +923,7 @@
 				$this->ci->session->unset_userdata($this->session_username);
 				$this->ci->session->unset_userdata($this->session_id);
 				redirect('/auth/site_closed');
+
 				return FALSE;
 			}
 
@@ -927,7 +942,7 @@
 		function download_profile_image($url, $override = FALSE)
 		{
 
-			$save_path = directory_map($this->ci->config->item('auth_profile_image_directory'));
+			$save_path  = directory_map($this->ci->config->item('auth_profile_image_directory'));
 			$image_path = '';
 			if ($override)
 			{

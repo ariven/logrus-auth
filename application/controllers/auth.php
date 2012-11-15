@@ -1,4 +1,7 @@
-<?php if (!defined('BASEPATH')) exit('No direct script access allowed');
+<?php if (!defined('BASEPATH'))
+{
+	exit('No direct script access allowed');
+}
 
 	class Auth extends MY_Controller
 	{
@@ -14,6 +17,7 @@
 
 			$this->config->load('logrus_auth');
 			$this->load->library('logrus_auth');
+			$this->load->library('msg');
 		}
 
 		function index()
@@ -26,7 +30,7 @@
 		{
 
 			$this->layout = FALSE;
-			$this->view = FALSE;
+			$this->view   = FALSE;
 
 			if ($provider == 'select')
 			{
@@ -37,16 +41,16 @@
 
 			$this->load->helper('url');
 			$this->load->library('oauth2');
-			$auth_access = $this->config->item('auth_access');
-			$client_id = $auth_access[$who]['client_id'];
+			$auth_access   = $this->config->item('auth_access');
+			$client_id     = $auth_access[$who]['client_id'];
 			$client_secret = $auth_access[$who]['client_secret'];
 
 			$provider = $this->oauth2->provider($provider, array(
-				'id' => $client_id,
-				'secret' => $client_secret
-			));
+																'id'     => $client_id,
+																'secret' => $client_secret
+														   ));
 
-			if (! $this->input->get('code'))
+			if (!$this->input->get('code'))
 			{
 				$provider->authorize();
 			}
@@ -55,13 +59,12 @@
 				try
 				{
 					$token = $provider->access($_GET['code']);
-					$user = $provider->get_user_info($token);
+					$user  = $provider->get_user_info($token);
 					// log him in, if not a member, and auth_open_enrollment, create account.
 					$this->logrus_auth->oauth2_member_login($provider->name, $token, $user);
-				}
-				catch(OAuth2_Exception $e)
+				} catch (OAuth2_Exception $e)
 				{
-					show_error('That didnt work '.$e);
+					show_error('That didnt work ' . $e);
 				}
 			}
 		}
@@ -73,6 +76,7 @@
 		{
 
 		}
+
 		/**
 		 * Receives a POST with parameter email to check if a user is registered, returns json response
 		 */
@@ -133,24 +137,26 @@
 
 		function login()
 		{
-			$this->load->helper('form');
-		}
-		/**
-		 * login url
-		 */
-		function login_form()
-		{
 			$this->load->library('form_validation');
+			$this->load->config('logrus_auth');
+
+			$variables['auth_open_enrollment'] = $this->config->item('auth_open_enrollment');
+			$variables['auth_use_oauth2']      = $this->config->item('auth_use_oauth2');
+
 			$is_ajax    = $this->input->is_ajax_request();
 			$ajax_error = FALSE;
 			$success    = TRUE;
 
-			$rules[] = array('field' => 'email',
-							 'label' => 'Email Address',
-							 'rules' => 'trim|required');
-			$rules[] = array('field' => 'password',
-							 'label' => 'Password',
-							 'rules' => 'required');
+			$rules[] = array(
+				'field' => 'email',
+				'label' => 'Email Address',
+				'rules' => 'trim|required'
+			);
+			$rules[] = array(
+				'field' => 'password',
+				'label' => 'Password',
+				'rules' => 'required'
+			);
 
 			// load any variables to refill the form
 			$variables['email']    = $this->input->post('email', TRUE);
@@ -175,7 +181,7 @@
 				}
 				else
 				{
-					$message = $this->load->view('auth/login_form', $variables, TRUE);
+					$message = $this->load->view('auth/login', $variables, TRUE);
 				}
 			}
 			else
@@ -235,18 +241,26 @@
 				$is_ajax    = $this->input->is_ajax_request();
 				$ajax_error = FALSE;
 
-				$rules[] = array('field' => 'email',
-								 'label' => 'Email Address',
-								 'rules' => 'trim|required|valid_email');
-				$rules[] = array('field' => 'display_name',
-								 'label' => 'Display Name',
-								 'rules' => 'trim');
-				$rules[] = array('field' => 'password',
-								 'label' => 'Password',
-								 'rules' => 'required');
-				$rules[] = array('field' => 'confirm',
-								 'label' => 'Confirm your password',
-								 'rules' => 'required|matches[password]');
+				$rules[] = array(
+					'field' => 'email',
+					'label' => 'Email Address',
+					'rules' => 'trim|required|valid_email'
+				);
+				$rules[] = array(
+					'field' => 'display_name',
+					'label' => 'Display Name',
+					'rules' => 'trim'
+				);
+				$rules[] = array(
+					'field' => 'password',
+					'label' => 'Password',
+					'rules' => 'required'
+				);
+				$rules[] = array(
+					'field' => 'confirm',
+					'label' => 'Confirm your password',
+					'rules' => 'required|matches[password]'
+				);
 
 				// load any variables to refill the form
 				$variables['email']        = $this->input->get_post('email', TRUE);
@@ -259,9 +273,9 @@
 				{
 					// first load or failed form
 					$error              = array(
-						'email'           => form_error('email'),
-						'password'        => form_error('password'),
-						'display_name'    => form_error('display_name'),
+						'email'        => form_error('email'),
+						'password'     => form_error('password'),
+						'display_name' => form_error('display_name'),
 					);
 					$variables['error'] = $error;
 					if ($is_ajax)
@@ -283,16 +297,15 @@
 					$member_check = $this->member->get_by('email', $email);
 					if ($member_check)
 					{
-						$message = '<span class="label label-important">Error</span> an account already exists with that email address.  Did you want to <a href=="/auth/reset_password">Reset your password</a> isntead?';
+						$message = '<span class="label label-important">Error</span> an account already exists with that email address.  Did you want to <a href="/auth/reset_password">Reset your password</a> isntead?';
 					}
 					else
 					{
 						$insert = $this->member->insert(
 							array(
-								'email'        => $email,
-								'created'      => date('Y-m-d H:i:s'),
-								'display_name' => $variables['display_name'],
-								'active'       => 1
+								 'email'        => $email,
+								 'display_name' => $variables['display_name'],
+								 'active'       => 1
 							)
 						);
 						if ($insert)
@@ -330,8 +343,8 @@
 				$this->data['content'] = $message;
 				$this->view            = 'layouts/wrapper';
 
-				$this->template->add_script('cookie.js');
-				$this->template->add_script('auth/signup_form.js');
+				// $this->data['javascript'][] = 'cookie.js'; // if you want to use CSRF use the https://github.com/carhartl/jquery-cookie plugin
+				$this->data['javascript'][] = 'auth/signup_form.js';
 			}
 		}
 
@@ -346,8 +359,10 @@
 			$code = $this->logrus_auth->valid_reset_code($confirm_code);
 			if ($code)
 			{
-				$this->member->update($code->member_id, array('email_confirmed' => 1,
-															  'active'          => 1));
+				$this->member->update($code->member_id, array(
+															 'email_confirmed' => 1,
+															 'active'          => 1
+														));
 				$message = $this->load->view('email_was_confirmed');
 			}
 			else
@@ -375,9 +390,11 @@
 			{
 				$this->load->library('form_validation');
 
-				$rules[] = array('field' => 'confirm',
-								 'label' => 'Confirm',
-								 'rules' => 'trim|required');
+				$rules[] = array(
+					'field' => 'confirm',
+					'label' => 'Confirm',
+					'rules' => 'trim|required'
+				);
 
 				// load any variables to refill the form
 				$variables['confirm'] = $this->input->post('confirm', TRUE);
@@ -437,7 +454,8 @@
 			}
 			else
 			{
-				$this->template->add_script('auth/confirm_email.js');
+				$this->data['javascript'][] = 'auth/confirm_email.js';
+
 				$this->data['content'] = $message;
 				$this->view            = 'layouts/wrapper';
 			}
@@ -461,60 +479,66 @@
 		{
 			if ($reset_code == 'none')
 			{
-				$this->template->render(
-					$this->msg->error('Invalid reset code.  Please copy the whole url from your email.')
-				);
-				return;
-			}
-			$this->load->library('logrus_auth');
-			$this->load->library('form_validation');
-			$is_ajax    = $this->input->is_ajax_request();
-			$ajax_error = FALSE;
-
-			$rules[] = array('field' => 'password',
-							 'label' => 'New password',
-							 'rules' => 'required');
-			$rules[] = array('field' => 'confirm',
-							 'label' => 'Confirm new password',
-							 'rules' => 'required');
-
-			$variables['code']     = $reset_code;
-			$variables['password'] = $this->input->post('password', TRUE);
-			$variables['confirm']  = $this->input->post('confirm', TRUE);
-
-			$this->form_validation->set_rules($rules);
-			if ($this->form_validation->run() == FALSE)
-			{
-				// first load or failed form
-				$error              = array(
-					'password' => form_error('password'),
-					'confirm'  => form_error('confirm'),
-				);
-				$variables['error'] = $error;
-				if ($is_ajax)
-				{
-					if (count($error) > 0)
-					{
-						$ajax_error = TRUE;
-					}
-					$message = $error;
-				}
-				else
-				{
-					$message = $this->load->view('auth/password_reset', $variables, TRUE);
-				}
+				$message = $this->msg->error('Invalid reset code.  Please copy the whole url from your email.');
 			}
 			else
 			{
-				if ($this->logrus_auth->validate_and_set_password($reset_code, $variables['password']))
+				$this->load->library('logrus_auth');
+				$this->load->library('form_validation');
+				$is_ajax    = $this->input->is_ajax_request();
+				$ajax_error = FALSE;
+
+				$rules[] = array(
+					'field' => 'password',
+					'label' => 'New password',
+					'rules' => 'required'
+				);
+				$rules[] = array(
+					'field' => 'confirm',
+					'label' => 'Confirm new password',
+					'rules' => 'required'
+				);
+
+				$variables['code']     = $reset_code;
+				$variables['password'] = $this->input->post('password', TRUE);
+				$variables['confirm']  = $this->input->post('confirm', TRUE);
+
+				$this->form_validation->set_rules($rules);
+				if ($this->form_validation->run() == FALSE)
 				{
-					$message = $this->msg->info('Your password has been reset.  <a href="/auth/login">Login Here</a>');
+					// first load or failed form
+					$error              = array(
+						'password' => form_error('password'),
+						'confirm'  => form_error('confirm'),
+					);
+					$variables['error'] = $error;
+					if ($is_ajax)
+					{
+						if (count($error) > 0)
+						{
+							$ajax_error = TRUE;
+						}
+						$message = $error;
+					}
+					else
+					{
+						$message = $this->load->view('auth/password_reset', $variables, TRUE);
+					}
 				}
 				else
 				{
-					$message = sprintf('There was a problem resetting your password. (%s) <a href=="/auth/reset_password">Try again?</a>', $this->logrus_auth->message);
+					if ($this->logrus_auth->validate_and_set_password($reset_code, $variables['password']))
+					{
+						$message = $this->msg->info('Your password has been reset.  <a href="/auth/login">Login Here</a>');
+					}
+					else
+					{
+						$message = sprintf('There was a problem resetting your password. (%s) <a href="/auth/reset_password">Try again?</a>',
+										   $this->logrus_auth->message);
+					}
 				}
 			}
+
 
 			if ($is_ajax)
 			{
@@ -532,9 +556,9 @@
 			}
 			else
 			{
-				$this->template->add_script('password_reset.js');
-				$this->data['content'] = $message;
-				$this->view            = 'layouts/wrapper';
+				$this->data['javascript'][] = 'auth/password_reset.js';
+				$this->data['content']        = $message;
+				$this->view                   = 'layouts/wrapper';
 			}
 		}
 
@@ -547,9 +571,11 @@
 			$is_ajax    = $this->input->is_ajax_request();
 			$ajax_error = FALSE;
 
-			$rules[] = array('field' => 'email',
-							 'label' => 'Your Email Address',
-							 'rules' => 'trim|required');
+			$rules[] = array(
+				'field' => 'email',
+				'label' => 'Your Email Address',
+				'rules' => 'trim|required'
+			);
 
 			$variables['email'] = $this->input->post('email', TRUE);
 
@@ -604,7 +630,8 @@
 			}
 			else
 			{
-				$this->template->add_script('auth/reset_password.js');
+				$this->data['javascript'][] = 'auth/reset_password.js';
+
 				$this->data['content'] = $message;
 				$this->view            = 'layouts/wrapper';
 			}
@@ -626,15 +653,21 @@
 				$is_ajax    = $this->input->is_ajax_request();
 				$ajax_error = FALSE;
 
-				$rules[] = array('field' => 'password',
-								 'label' => 'Current Password',
-								 'rules' => 'required');
-				$rules[] = array('field' => 'new_password',
-								 'label' => 'New Password',
-								 'rules' => 'trim|required|min_length[6]');
-				$rules[] = array('field' => 'confirm_password',
-								 'label' => 'Confirm new password',
-								 'rules' => 'trim|required|matches[new_password]');
+				$rules[] = array(
+					'field' => 'password',
+					'label' => 'Current Password',
+					'rules' => 'required'
+				);
+				$rules[] = array(
+					'field' => 'new_password',
+					'label' => 'New Password',
+					'rules' => 'trim|required|min_length[6]'
+				);
+				$rules[] = array(
+					'field' => 'confirm_password',
+					'label' => 'Confirm new password',
+					'rules' => 'trim|required|matches[new_password]'
+				);
 
 				// load any variables to refill the form
 				$variables['password']         = $this->input->post('password', TRUE);
@@ -701,8 +734,6 @@
 			}
 			else
 			{
-				$this->template->add_script('cookie.js');
-				$this->template->add_script('auth_change_password.js');
 				$this->data['content'] = $message;
 				$this->view            = 'layouts/wrapper';
 			}
