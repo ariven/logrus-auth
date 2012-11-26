@@ -85,10 +85,8 @@
 			$this->layout = FALSE;
 			$this->view   = FALSE;
 
-			$this->load->model('logrus/member');
-
 			$email  = strtolower(trim($this->input->post('email')));
-			$member = $this->member->get_by('email', $email);
+			$member = $this->logrus_auth->member_exists($email);
 
 			if ($member)
 			{
@@ -115,23 +113,14 @@
 			$email    = strtolower(trim($this->input->post('email', TRUE)));
 			$password = $this->input->post('password');
 
-			$member = $this->member->get_by('email', $email);
-			if ($member)
+			if ($this->logrus_auth->login($email, $password, TRUE))
 			{
-				if ($this->logrus_auth->login($email, $password, TRUE))
-				{
-					$response['status'] = 'OK';
-				}
-				else
-				{
-					$response['status'] = 'passwordError';
-				}
+				$response['status'] = 'OK';
 			}
 			else
 			{
-				$response['status'] = 'passwordError';
+				$response['status'] = 'credentialsError';
 			}
-
 			echo json_encode($response);
 		}
 
@@ -186,25 +175,13 @@
 			}
 			else
 			{
-				$email  = strtolower(trim($variables['email']));
-				$member = $this->member->get_by('email', $email);
-				if ($member)
-				{
-					$password = $variables['password'];
-					if ($this->logrus_auth->login($email, $password, TRUE))
-					{
-						// $message = $this->msg->info('Logged in.');
-						redirect($this->config->item('auth_logged_in_url'));
-					}
-					else
-					{
-						$message = $this->logrus_auth->message;
-					}
-				}
-				else
+				$email = strtolower(trim($variables['email']));
+
+				if (!$this->logrus_auth->login($email, $variables['password'], FALSE))
 				{
 					$message = $this->msg->error('email address or password did not match our records.');
 				}
+				// no else, we redirected if successful login
 			}
 
 			if ($is_ajax)
@@ -235,7 +212,7 @@
 		{
 			$this->load->library('form_validation');
 			$this->load->library('logrus_auth');
-			$this->load->model('logrus/member');
+
 			if ($this->config->item('auth_open_enrollment'))
 			{
 				$is_ajax    = $this->input->is_ajax_request();
@@ -294,26 +271,19 @@
 				else
 				{
 					$email        = strtolower(trim($variables['email']));
-					$member_check = $this->member->get_by('email', $email);
+					$member_check = $this->logrus_auth->get_member($email);
 					if ($member_check)
 					{
 						$message = '<span class="label label-important">Error</span> an account already exists with that email address.  Did you want to <a href="/auth/reset_password">Reset your password</a> isntead?';
 					}
 					else
 					{
-						$insert = $this->member->insert(
-							array(
-								 'email'        => $email,
-								 'display_name' => $variables['display_name'],
-								 'active'       => 1
-							)
-						);
-						if ($insert)
+						if ($this->logrus_auth->create_member($email, $variables['display_name']))
 						{
-							$member = $this->member->get($insert);
-							$this->logrus_auth->set_password($member->id, $variables['password']);
-							$this->logrus_auth->reset_password($insert, 'new'); // send email
-							$message = $this->load->view('auth/signup_completed');
+							$member = $this->logrus_auth->get_member($email);
+							$this->logrus_auth->set_password($email, $variables['password']);
+							$this->logrus_auth->reset_password($member->id, 'new'); // send new email
+							$message = $this->load->view('auth/signup_completed', '', TRUE);
 						}
 						else
 						{
@@ -355,19 +325,21 @@
 		 */
 		function confirm_email_code($confirm_code)
 		{
-			$this->load->model('logrus/member');
 			$code = $this->logrus_auth->valid_reset_code($confirm_code);
 			if ($code)
 			{
-				$this->member->update($code->member_id, array(
-															 'email_confirmed' => 1,
-															 'active'          => 1
-														));
-				$message = $this->load->view('email_was_confirmed');
+				if ($this->logrus_auth->update_member_field($code->username, 'email_confirmed', 1))
+				{
+					$message = $this->load->view('auth/email_was_confirmed', '', TRUE);
+				}
+				else
+				{
+					$message = $this->msg->error('There was an error on our end confirming your email address.  Please try again later');
+				}
 			}
 			else
 			{
-				$message = $this->load->view('email_not_confirmed');
+				$message = $this->load->view('auth/email_not_confirmed', '', TRUE);
 			}
 			$this->data['content'] = $message;
 			$this->view            = 'layouts/wrapper';
@@ -557,8 +529,8 @@
 			else
 			{
 				$this->data['javascript'][] = 'auth/password_reset.js';
-				$this->data['content']        = $message;
-				$this->view                   = 'layouts/wrapper';
+				$this->data['content']      = $message;
+				$this->view                 = 'layouts/wrapper';
 			}
 		}
 

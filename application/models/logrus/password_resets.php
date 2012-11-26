@@ -3,6 +3,8 @@
 
 	class Password_resets extends MY_Model
 	{
+		public $before_create = array('created_at'); // automagically track datetime
+
 		public function __construct()
 		{
 			parent::__construct();

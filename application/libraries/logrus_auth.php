@@ -27,6 +27,8 @@
 		protected $session_id;
 		protected $keep_login_duration;
 
+		protected $password_library;
+
 		public $member_menu = ''; // login menu
 		public $open_enrollment = FALSE; // do we accept apps, or make admin generate
 
@@ -38,35 +40,62 @@
 		function __construct()
 		{
 			$this->ci = & get_instance();
-			$this->ci->load->config('logrus_auth');
-			$this->ci->load->library('session');
-			$this->ci->load->helper('url');
-			$this->ci->load->library('notify');
-			$this->ci->load->library('pbkdf2');
-			$this->ci->load->model('lg');
+			$this->load->config('logrus_auth');
+			$this->load->library('session');
+			$this->load->helper('url');
+			$this->load->library('notify');
+			$this->load->library('pbkdf2');
+			$this->load->model('lg');
 
-			$this->login_page  = strtolower($this->ci->config->item('auth_login_url'));
-			$this->use_ssl     = $this->ci->config->item('auth_use_ssl');
-			$this->auth_tables = $this->ci->config->item('auth_tables');
+			$this->login_page       = strtolower($this->config->item('auth_login_url'));
+			$this->use_ssl          = $this->config->item('auth_use_ssl');
+			$this->auth_tables      = $this->config->item('auth_tables');
+			$this->password_library = $this->config->item('auth_password_library');
 
-			$this->session_username    = $this->ci->config->item('auth_session_username');
-			$this->session_id          = $this->ci->config->item('auth_session_id');
-			$this->keep_login_duration = $this->ci->config->item('auth_keep_login_duration');
+			$this->load->library($this->password_library, '', 'password'); // load the password server
+
+			$this->session_username    = $this->config->item('auth_session_username');
+			$this->session_id          = $this->config->item('auth_session_id');
+			$this->keep_login_duration = $this->config->item('auth_keep_login_duration');
 
 			$this->login_snippet = '';
 
 			// get redirect url
-			$this->redirect_to = strtolower($this->ci->session->userdata($this->ci->config->item('auth_redirect')));
+			$this->redirect_to = strtolower($this->session->userdata($this->ci->config->item('auth_redirect')));
 			if ($this->redirect_to)
 			{
-				$this->session->unset_userdata($this->ci->config->item('auth_redirect'));
+				$this->session->unset_userdata($this->config->item('auth_redirect'));
 			}
 
 			$this->ssl_check();
 			$this->get_member();
 			$this->login_menu();
-			$this->open_enrollment = $this->ci->config->item('open_enrollment');
+			$this->open_enrollment = $this->config->item('open_enrollment');
 
+		}
+
+
+		/**
+		 * Allows library to access CI's loaded classes using the same
+		 * syntax as controllers.
+		 *
+		 * @param    string
+		 * @access private
+		 */
+		function __get($key)
+		{
+			return $this->ci->$key;
+		}
+
+		/**
+		 * basic cleanup on username
+		 *
+		 * @param $username
+		 * @return string
+		 */
+		function prep_username($username)
+		{
+			return strtolower(trim(filter_var($username, FILTER_SANITIZE_STRING)));
 		}
 
 		/**
@@ -81,7 +110,7 @@
 			{
 				if (is_numeric($which))
 				{
-					$this->ci->load->model('logrus/user_groups');
+					$this->load->model('logrus/user_groups');
 					$group = $this->groups->get($which);
 					$which = $group['name'];
 				}
@@ -135,77 +164,69 @@
 		 */
 		function login($email, $password, $skip_redirect = FALSE)
 		{
-			$this->ci->load->model('logrus/failed_logins');
-			$this->ci->load->model('logrus/member');
 
-			$email         = strtolower(trim($email));
+			$username      = $this->prep_username($email);
 			$this->message = '';
-			$success       = TRUE;
+			$success       = FALSE;
+			$member        = $this->password->get_member($username);
 
-			$member = $this->ci->member->get_by('email', $email);
-
-			if (!$member)
-			{
-				// no user found, fail
-				$this->message = 'email address or password did not match our records. ' . __LINE__;
-				$success       = FALSE;
-			}
-			else
+			if ($member)
 			{
 				if ($member->active == 0)
 				{
-					$this->message = 'Inactive user. ' . __LINE__;
-					$success       = FALSE;
+					$this->message = 'Inactive user';
+				}
+				if ($this->password->get_failed_login_count($member->email))
+				{
+					$fail_time     = $this->config->item('auth_failed_time');
+					$mins          = floor($fail_time / 60);
+					$this->message = sprintf('Failed login count exceeded, You can try again in %d minues.', $mins);
 				}
 				else
 				{
-					if ($this->failed_login_count($member->id))
+					if ($this->password->validate_password($password, $member->hash))
 					{
-						$success       = FALSE;
-						$fail_time     = $this->config->item('auth_failed_time');
-						$mins          = floor($fail_time / 60);
-						$this->message = sprintf('Failed login count exceeded, You can try again in %d minues.', $mins);
+						$this->message = 'Logged in';
+						$success       = TRUE;
 					}
 					else
 					{
-						if ($member->hash == $this->ci->pbkdf2->validate_password($password, $member->hash))
-						{
-							$this->message = 'logged in.';
-						}
-						else
-						{
-							$this->message = 'email address or password did not match our records. ' . __LINE__;
-							$success       = FALSE;
-						}
+						$this->message = 'email address or password did not match our records';
 					}
 				}
 			}
+			else
+			{
+				$this->message = 'email address or password did not match our records';
+				$success       = FALSE;
+			}
+
 			if ($success)
 			{
-				$session_id = $this->ci->session->userdata($this->ci->config->item('auth_session_id'));
+				$session_id = $this->session->userdata($this->ci->config->item('auth_session_id'));
 				if (!$session_id)
 				{
-					$this->ci->load->helper('string');
+					$this->load->helper('string');
 					$session_id = hash('sha512', random_string('alnum', 128));
 				}
 				$this->update_session($member->id, $session_id);
-				$this->ci->session->set_userdata($this->session_username, $email);
-				$this->ci->session->set_userdata($this->session_id, $session_id);
+				$this->session->set_userdata($this->session_username, $email);
+				$this->session->set_userdata($this->session_id, $session_id);
 				$this->message = 'Logged in';
 				if (!$skip_redirect)
 				{
-					redirect($this->ci->config->item('auth_logged_in_url'));
+					redirect($this->config->item('auth_logged_in_url'));
 				}
 
 				return TRUE;
 			}
 			else
 			{
-				$this->ci->session->unset_userdata($this->session_username);
-				$this->ci->session->unset_userdata($this->session_id);
+				$this->session->unset_userdata($this->session_username);
+				$this->session->unset_userdata($this->session_id);
 				if ($member)
 				{
-					$this->increase_fail_count($member->id);
+					$this->password->increase_fail_count($member->email);
 				}
 
 				return FALSE;
@@ -221,17 +242,7 @@
 		 */
 		function member_by_email($email)
 		{
-			$email = filter_var(strtolower(trim($email)), FILTER_SANITIZE_EMAIL);
-			if ($email)
-			{
-				$member = $this->ci->member->get_by('email', $email);
-
-				return $member;
-			}
-			else
-			{
-				return FALSE;
-			}
+			return $this->password->get_member($this->prep_username($email));
 		}
 
 		/**
@@ -239,54 +250,50 @@
 		 *
 		 * @return array|bool
 		 */
-		function get_member()
+		function get_member($username = FALSE)
 		{
-
 			$this->member        = array();
 			$this->member_groups = array();
-			$email               = filter_var($this->ci->session->userdata($this->session_username),
-											  FILTER_SANITIZE_EMAIL);
-			$this->ci->load->model('logrus/member');
-
-			if ($email)
+			if (!$username)
 			{
-				$member = $this->member_by_email($email);
-				if ($member)
-				{
-					$this->member = $member;
-				}
+				$username = $this->prep_username($this->ci->session->userdata($this->session_username));
 			}
 			else
 			{
-				$this->member = array();
+				$username = $this->prep_username($username);
+			}
+			if ($username)
+			{
+				$this->member = $this->password->get_member($username);
 			}
 
 			return $this->member;
 		}
 
+		function member_exists($username)
+		{
+			return $this->password->get_member($username);
+		}
 
 		/**
 		 * returns TRUE if user is logged in, will log out user who doesnt meet criteria
 		 */
 		function logged_in()
 		{
-			$this->ci->load->model('logrus/member');
-			$this->ci->load->model('logrus/session_auth');
-			$this->ci->load->model('logrus/profile');
-			$this->ci->load->helper('gravatar');
 
+			$this->ci->load->helper('gravatar');
+			$this->ci->load->model('logrus/profile');
+			$this->ci->load->model('logrus/session_auth');
+
+			$username      = $this->prep_username($this->session->userdata($this->session_username));
+			$session_id    = $this->session->userdata($this->session_id);
+			$member        = $this->password->get_member($username);
 			$this->message = 'NOT logged in'; // assume the worst
 			$valid         = FALSE;
 
-
-			$email = strtolower(trim($this->ci->session->userdata($this->session_username)));
-
-			$session_id = $this->ci->session->userdata($this->session_id);
-
-			$member = $this->ci->member->get_by('email', $email);
-			if ($member)
+			if ($member and ($this->valid_session($member->id, $session_id)))
 			{
-				$profile = $this->ci->profile->get_by('member_id', $member->id);
+				$profile = $this->password->get_profile($username);
 				if ($profile)
 				{
 					$profile_picture = $profile->profile_picture;
@@ -295,24 +302,13 @@
 				{
 					$profile_picture = gravatar_image($member->email);
 				}
-			}
 
-			if (($member) and ($this->valid_session($member->id, $session_id)))
-			{
 				$this->update_session($member->id, $session_id);
-
-				$this->message                  = 'logged in';
-				$valid                          = TRUE;
-				$member_data['profile_picture'] = $profile_picture;
-				if ($member->display_name == '')
-				{
-					$member_data['display_name'] = $member->email;
-				}
-				else
-				{
-					$member_data['display_name'] = $member->display_name;
-				}
-				$member_data['email'] = $member->email;
+				$this->message = 'logged in';
+				$valid         = TRUE;
+				// $member_data['profile_picture'] = $profile_picture;
+				// $member_data['display_name'] = ($member->display_name) ? $member->display_name : $member->email;
+				// $member_data['email'] = $member->email;
 			}
 
 			if (!$valid)
@@ -336,12 +332,10 @@
 		{
 			$this->ci->load->helper('url');
 			$this->ci->load->helper('string');
-			$this->ci->load->model('logrus/member');
 
-			$email  = strtolower(trim($this->ci->session->userdata($this->session_username)));
-			$member = $this->ci->member->get_by('email', $email);
-
-			$session_id = $this->ci->session->userdata($this->session_id);
+			// $username = $this->prep_username($this->session->userdata($this->session_username));
+			// $member = $this->password->get_member($username);
+			$session_id = $this->session->userdata($this->session_id);
 			if ($session_id)
 			{
 				$this->clear_session($session_id);
@@ -390,12 +384,12 @@
 		 */
 		function valid_reset_code($reset_code)
 		{
-			$this->ci->load->model('logrus/password_resets');
+			$this->load->model('logrus/password_resets');
 
-			$reset = $this->ci->password_resets->get_by('reset_code', $reset_code);
+			$reset = $this->password_resets->get_by('reset_code', $reset_code);
 			if ($reset)
 			{
-				if (strtotime($reset->reset_date) > (time() - $this->ci->config->item('auth_password_reset_expires')))
+				if (strtotime($reset->created_at) > (time() - $this->config->item('auth_password_reset_expires')))
 				{
 					return $reset;
 				}
@@ -412,25 +406,12 @@
 			return FALSE;
 		}
 
-		/**
-		 * @param $member_id member id
-		 * @param $password  password to check
-		 * @return bool
-		 */
-		function password_matches($member_id, $password)
+		function password_matches($username, $password)
 		{
-			$this->ci->load->model('logrus/member');
-			$member = $this->ci->member->get($member_id);
+			$member = $this->password->get_member($username);
 			if ($member)
 			{
-				if ($this->ci->pbkdf2->validate_password($password, $member->hash))
-				{
-					return TRUE;
-				}
-				else
-				{
-					return FALSE;
-				}
+				return $this->password->validate_password($password, $member->hash);
 			}
 			else
 			{
@@ -440,6 +421,7 @@
 			}
 		}
 
+
 		/**
 		 * Sets the users password
 		 *
@@ -447,29 +429,9 @@
 		 * @param $password
 		 * @return bool success
 		 */
-		function set_password($member_id, $password)
+		function set_password($username, $password)
 		{
-			$this->ci->load->model('logrus/member');
-			$member = $this->ci->member->get($member_id);
-			if ($member)
-			{
-				$result = $this->ci->member->update(
-					$member_id,
-					array('hash' => $this->ci->pbkdf2->create_hash($password))
-				);
-				if ($result)
-				{
-					return TRUE;
-				}
-				else
-				{
-					return FALSE;
-				}
-			}
-			else
-			{
-				return FALSE;
-			}
+			return $this->password->set_password($username, $password);
 		}
 
 		/**
@@ -484,7 +446,7 @@
 			$code = $this->valid_reset_code($reset_code);
 			if ($code)
 			{
-				return $this->set_password($code->member_id, $password);
+				return $this->set_password($code->username, $password);
 			}
 
 			return FALSE;
@@ -498,24 +460,29 @@
 		 */
 		function reset_password($id, $reset_type)
 		{
-			$this->ci->load->model('logrus/member');
-			$this->ci->load->model('logrus/password_resets');
-			$this->ci->load->library('notify');
 
-			// clean up old resets
-			$this->ci->password_resets->delete_by('reset_date <', date('Y-m-d H:i:s',
-																	   time() - $this->ci->config->item('auth_password_reset_expires')));
+			$this->load->model('logrus/password_resets');
+			$this->load->library('notify');
+			$this->load->helper('string');
 
-			$member = $this->ci->member->get($id);
+			// clean up expired resets
+			$this->password_resets->delete_by(
+				'created_at < ',
+				date('Y-m-d H:i:s',
+					 time() - $this->config->item('auth_password_reset_expires')));
+
+
+			$member = $this->password->get_member_by_id($id);
+
 			if ($member)
 			{
-				$reset_code = hash('sha1', print_r($member, TRUE) . time());
-				$this->ci->password_resets->delete_by('member_id', $member->id); // clear old resets
-				$this->ci->password_resets->insert(
+				$reset_code = random_string('sha1', 32);
+				$this->password_resets->delete_by('member_id', $member->id); // clear old resets
+				$this->password_resets->insert(
 					array(
 						 'member_id'  => $member->id,
+						 'username'   => $member->email,
 						 'reset_code' => $reset_code,
-						 'reset_date' => date('Y-m-d H:i:s')
 					)
 				);
 
@@ -530,36 +497,30 @@
 					$email_subject = 'New Account at ' . site_url();
 				}
 
-				$result = $this->ci->notify->send_now(
+				$result = $this->notify->send_now(
 					$member->email,
 					$member->display_name,
 					$email_subject,
-					$this->ci->load->view($email_view, array(
-															'name'       => $member->display_name,
-															'base_url'   => site_url(),
-															'reset_code' => $reset_code
-													   ), TRUE)
+					$this->load->view($email_view, array(
+														'name'       => $member->display_name,
+														'base_url'   => site_url(),
+														'reset_code' => $reset_code
+												   ), TRUE)
 				);
 
-				return $reset_code;
+				if ($result)
+				{
+					return $reset_code;
+				}
+				else
+				{
+					return FALSE;
+				}
 			}
 
 			return FALSE;
 		}
 
-
-		/**
-		 * Returns TRUE if user failed login count
-		 *
-		 * @param $id member id
-		 * @return bool
-		 */
-		public function failed_login_count($id)
-		{
-			$this->ci->load->model('logrus/failed_logins');
-
-			return $this->ci->failed_logins->failed_count($id);
-		}
 
 		/**
 		 * Clears up failed logins for a user before natural expiration time.
@@ -599,10 +560,9 @@
 		 */
 		public function update_session($member_id, $session_id, $login_authority = FALSE)
 		{
-			$this->ci->load->model('logrus/session_auth');
-			$this->ci->load->model('logrus/member');
-			$member  = $this->ci->member->get($member_id);
-			$session = $this->ci->session_auth->get_by('session_id', $session_id);
+			$this->load->model('logrus/session_auth');
+			$member  = $this->password->get_member_by_id($member_id);
+			$session = $this->session_auth->get_by('session_id', $session_id);
 
 			if ($member)
 			{
@@ -618,13 +578,13 @@
 				}
 				if ($session)
 				{
-					$this->ci->session_auth->update($session->id, $session_info);
+					$this->session_auth->update($session->id, $session_info);
 				}
 				else
 				{
 					$session_info['session_id'] = $session_id;
 
-					$this->ci->session_auth->insert($session_info);
+					$this->session_auth->insert($session_info);
 				}
 			}
 		}
@@ -636,13 +596,12 @@
 		 */
 		public function clear_session($session_id)
 		{
-			$this->ci->load->model('logrus/session_auth');
-			$session = $this->ci->session_auth->get($session_id);
+			$this->load->model('logrus/session_auth');
+			$session = $this->session_auth->get($session_id);
 			if ($session)
 			{
-				$this->ci->session_auth->delete($session_id);
+				$this->session_auth->delete($session_id);
 			}
-
 		}
 
 		/**
@@ -652,11 +611,11 @@
 		 */
 		public function session_logged_in($session_id)
 		{
-			$this->ci->load->model('logrus/session_auth');
-			$session = $this->ci->session_auth->get_by('session_id', $session_id);
+			$this->load->model('logrus/session_auth');
+			$session = $this->session_auth->get_by('session_id', $session_id);
 			if ($session)
 			{
-				if (strtotime($session->last_login) < (time() - $this->ci->config->item('auth_keep_login_duration')))
+				if (strtotime($session->last_login) < (time() - $this->config->item('auth_keep_login_duration')))
 				{
 					if ($session->logged_in)
 					{
@@ -677,13 +636,13 @@
 		 */
 		public function valid_session($member_id, $session_id)
 		{
-			$this->ci->load->model('logrus/session_auth');
-			$this->ci->load->model('logrus/member');
-			$member  = $this->ci->member->get($member_id);
-			$session = $this->ci->session_auth->get_by('session_id', $session_id);
+			$this->load->model('logrus/session_auth');
+			$member = $this->password->get_member_by_id($member_id);
+
+			$session = $this->session_auth->get_by('session_id', $session_id);
 			if (($member) and ($session))
 			{
-				if ((strtotime($session->last_login) - (time() > $this->ci->config->item('auth_keep_login_duration'))))
+				if ((strtotime($session->last_login) - (time() > $this->config->item('auth_keep_login_duration'))))
 				{
 					if ($session->logged_in)
 					{
@@ -706,109 +665,34 @@
 		{
 			if ($this->logged_in())
 			{
-				$this->member_menu = $this->ci->load->view('auth/menu_member_logged_in', $this->member, TRUE);
+				$this->member_menu = $this->load->view('auth/menu_member_logged_in', $this->member, TRUE);
 			}
 			else
 			{
-				$this->member_menu = $this->ci->load->view('auth/menu_member_not_logged_in', '', TRUE);
-			}
-
-		}
-
-
-		/**
-		 * tries to retrieve members profile
-		 *
-		 * @param $id
-		 * @return mixed
-		 */
-		function member_profile($id)
-		{
-			$this->ci->load->model('logrus/profile');
-
-			return $this->ci->profile->get_by('member_id', $id);
-		}
-
-		/**
-		 * Sets specified profile field for member, creates profile if none exists
-		 *
-		 * @param $id
-		 * @param $which
-		 * @param $what
-		 */
-		function set_profile_field($id, $which, $what)
-		{
-			$this->ci->load->model('logrus/profile');
-			$profile = $this->member_profile($id);
-			if (!$profile)
-			{
-				$this->ci->profile->insert(array(
-												'member_id' => $id,
-												$which      => $what
-										   ));
-			}
-			else
-			{
-				$this->ci->profile->update($id, array($which => $what));
+				$this->member_menu = $this->load->view('auth/menu_member_not_logged_in', '', TRUE);
 			}
 		}
 
 
-		function get_profile_field($id, $which)
+		function create_member($username, $name)
 		{
-			$this->ci->load->model('logrus/profile');
-			$profile = $this->member_profile($id);
-			if ($profile)
-			{
-				if ($profile->$which)
-				{
-					return $profile->$which;
-				}
-			}
+			$username = $this->prep_username($username);
+			$result   = $this->password->create_member($username, $name);
 
-			return '';
+			return $result;
 		}
 
-
-		function create_member($email, $name)
+		function update_member_field($username, $field, $data)
 		{
-			$this->ci->load->model('logrus/member');
-			$this->ci->load->helper('string');
-			$success = TRUE;
+			$username = $this->prep_username($username);
 
-			$result = $this->ci->member->insert(array(
-													 'email'        => strtolower(trim($email)),
-													 'display_name' => trim($name),
-													 'hash' => $this->ci->pbkdf2->create_hash(random_string('alnum', 128))
-												));
-			if ($result)
-			{
-				if ($this->ci->config->item('auth_create_default_group'))
-				{
-					$this->ci->load->model('logrus/groups');
-					$this->ci->load->model('logrus/member_groups');
-					$group        = $this->ci->groups->get_by('tag', $this->ci->config->item('auth_default_group'));
-					$group_result = $this->ci->member_groups->insert(array(
-																		  'group_id'  => $group->id,
-																		  'member_id' => $result
-																	 ));
-					if (!$group_result)
-					{
-						$this->ci->lg->error('Failed to create default group for member ' . $result);
-					}
-				}
-			}
-			else
-			{
-				$success = FALSE;
-			}
-
-			return $success;
+			return $this->password->set_member_field($username, $field, $data);
 		}
 
 		// //////////////////////////////////////////////////////////////////
 		// //  OAuth 2 Stuff ////////////////////////////////////////////////
 		// //////////////////////////////////////////////////////////////////
+
 		/**
 		 * Looks up member by OAuth2 UID
 		 *
@@ -817,16 +701,7 @@
 		 */
 		function member_by_uid($uid)
 		{
-			if ($uid)
-			{
-				$member = $this->ci->member->get_by('oauth2_uid', $uid);
-
-				return $member;
-			}
-			else
-			{
-				return FALSE;
-			}
+			return $this->password->get_member_by_field('oauth2_uid', $uid);
 		}
 
 		/**
@@ -838,31 +713,24 @@
 		 */
 		function oauth2_update_member($provider_name, $token, $user_fields)
 		{
-			$member = $this->member_by_email($user_fields['email']);
-			$this->ci->member->update($member->id, array('login_authority' => $provider_name));
+			$username = $this->prep_user_name($user_fields['email']);
+			$member   = $this->password->get_member($username);
+			$profile  = $this->password->get_profile($username);
+			$this->password->set_member_field($username, 'login_authority', $provider_name);
 
-			if (!$this->get_profile_field($member->id, 'profile_picture'))
+			if ($profile)
 			{
-				if (isset($user_fields['image']))
+				if (!$profile->profile_picture)
 				{
-					$this->set_profile_field($member->id, 'profile_picture', $user_fields['image']);
-				}
-				else
-				{
-					$this->ci->load->helper('gravatar');
-					$this->set_profile_field($member->id, 'profile_picture', gravatar_image($user_fields['email']));
+					$this->password->set_profile_field($username, 'profile_picture',
+													   (isset($user_fields['image'])) ? $user_fields['image'] : gravatar_image($user_fields['email']));
 				}
 			}
 			if (!$member->display_name)
 			{
-				if (isset($user_fields['name']))
-				{
-					$this->ci->member->update($member->id, array('display_name' => $user_fields['name']));
-				}
-				else
-				{
-					$this->ci->member->update($member->id, array('display_name' => $user_fields['email']));
-				}
+				$this->password->set_member_field($username, 'display_name',
+												  (isset($user_fields['name'])) ? $user_fields['name'] : $user_fields['email']
+				);
 			}
 		}
 
@@ -885,7 +753,7 @@
 			$member = $this->member_by_email($user_fields['email']);
 			if (!$member)
 			{
-				if ($this->ci->config->item('auth_open_enrollment'))
+				if ($this->config->item('auth_open_enrollment'))
 				{
 					// make an account, log them in
 					$this->create_member($user_fields['email'], $user_fields['name']);
@@ -901,18 +769,18 @@
 			{
 				$this->oauth2_update_member($provider_name, $token, $user_fields);
 
-				$session_id = $this->ci->session->userdata($this->ci->config->item('auth_session_id'));
+				$session_id = $this->session->userdata($this->config->item('auth_session_id'));
 				if (!$session_id)
 				{
 					$session_id = hash('sha512', random_string('alnum', 128));
 				}
 				$this->update_session($member->id, $session_id);
-				$this->ci->session->set_userdata($this->session_username, $user_fields['email']);
-				$this->ci->session->set_userdata($this->session_id, $session_id);
+				$this->session->set_userdata($this->session_username, $user_fields['email']);
+				$this->session->set_userdata($this->session_id, $session_id);
 				$this->message = 'Logged in';
 				if (!$skip_redirect)
 				{
-					redirect($this->ci->config->item('auth_logged_in_url'));
+					redirect($this->config->item('auth_logged_in_url'));
 				}
 
 				return TRUE;
@@ -920,39 +788,13 @@
 			else
 			{
 				// Cant log in if not a member.
-				$this->ci->session->unset_userdata($this->session_username);
-				$this->ci->session->unset_userdata($this->session_id);
+				$this->session->unset_userdata($this->session_username);
+				$this->session->unset_userdata($this->session_id);
 				redirect('/auth/site_closed');
 
 				return FALSE;
 			}
 
 		}
-
-		// ///////////////////////////////////////////////////////////////////////
-		// //  Profile image support  ////////////////////////////////////////////
-		// ///////////////////////////////////////////////////////////////////////
-
-		/**
-		 * grabs the profile image off the interwebs and saves it locally for thumbnail processing.
-		 * Checks to see if it exists locally unless $override is TRUE
-		 *
-		 * @param $url
-		 */
-		function download_profile_image($url, $override = FALSE)
-		{
-
-			$save_path  = directory_map($this->ci->config->item('auth_profile_image_directory'));
-			$image_path = '';
-			if ($override)
-			{
-				if (file_exists)
-				{
-
-				}
-			}
-
-		}
-
 	}
 

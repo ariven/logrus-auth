@@ -1,5 +1,7 @@
 <?php
 	class Failed_logins extends MY_Model {
+		public $before_create = array('created_at'); // automagically track datetime
+
 		public function __construct() {
 			parent::__construct();
 			$this->load->config('logrus_auth');
@@ -7,7 +9,6 @@
 			$prefix = $this->config->item('auth_table_prefix');
 
 			$this->_table = $prefix . $tables['failed_logins'];
-
 		}
 
 
@@ -22,7 +23,7 @@
 		{
 			$this->load->config('logrus_auth');
 			$this->db->where('member_id', $id);
-			$this->db->where('fail_date >', date('Y-m-d H:i:s', time() - $this->config->item('auth_failed_time')));
+			$this->db->where('created_at >', date('Y-m-d H:i:s', time() - $this->config->item('auth_failed_time')));
 
 			$records = $this->get_all();
 			if (count($records) >= $this->config->item('auth_failed_count'))

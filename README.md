@@ -66,3 +66,12 @@ change though allows you to fine tune your password hash generation to increase 
 
 - Created install controller that will create the tables and foreign keys needed.  This is experimental.  This also
 changes the structure of several of the tables, so it is an all or nothing thing.
+
+- Added a new library file, logrus/password.php.  This file is used as a replaceable connector to manage member records.
+This allows the general logic in logrus_auth.php to be static without needing to change it if you decide to change how
+you manage the member accounts.  All you have to do is created your own version of the functions in logrus/password.php
+and change the new parameter in logrus_auth config (auth_password_library) to point to your new library.  The reason
+for this added layer of abstraction is that I found the need to build a RESTful style password server that handles
+the creation/authentication of user accounts and passwords on a remote server instead of storing the password hashes
+locally.  If there is any desire to see the password server let me know and I will clean up my new connector for it as
+well as the code itself and put it up on github to use.

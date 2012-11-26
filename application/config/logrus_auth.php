@@ -21,6 +21,8 @@
 
 	$config['auth_table_prefix'] = ''; // default table prefix
 
+	$config['auth_password_library'] = 'logrus/password'; // password library
+
 	/**
 	 * names of the individual tables
 	 */
@@ -31,6 +33,10 @@
 	$config['auth_tables']['members']         = 'members'; // user master table
 	$config['auth_tables']['sessions']        = 'session_auth'; // user sessions
 	$config['auth_tables']['profiles']        = 'profiles'; // configurable metadata table
+
+	$config['auth_oauth2_use_google']      = FALSE;
+	$config['auth_oauth2_use_windowslive'] = FALSE;
+	$config['auth_oauth2_use_facebook']    = FALSE;
 
 // https://code.google.com/apis/console to get your keys
 	$config['auth_access']['google']['client_id']          = 'CLIENT ID HERE';
