@@ -62,6 +62,12 @@
 			return FALSE;
 		}
 
+		/**
+		 * Gets the member record by $id
+		 *
+		 * @param $id
+		 * @return bool|stdClass
+		 */
 		function get_member_by_id($id)
 		{
 			$this->load->model('logrus/member');
@@ -80,6 +86,13 @@
 			return FALSE;
 		}
 
+		/**
+		 * Gets the member by arbetrary field.  Must be unique
+		 *
+		 * @param $field
+		 * @param $data
+		 * @return bool|stdClass
+		 */
 		function get_member_by_field($field, $data)
 		{
 			$this->load->model('logrus/member');
@@ -98,6 +111,13 @@
 			return FALSE;
 		}
 
+		/**
+		 * Creates a new user
+		 *
+		 * @param $email
+		 * @param $name
+		 * @return bool
+		 */
 		function create_member($email, $name)
 		{
 			$this->load->model('logrus/member');
@@ -138,6 +158,12 @@
 			}
 		}
 
+		/**
+		 * Retrieves a members profile record
+		 *
+		 * @param $username
+		 * @return bool
+		 */
 		function get_profile($username)
 		{
 			$member = $this->get_member($username);
@@ -156,6 +182,14 @@
 			}
 		}
 
+		/**
+		 * Changes the value of a field in a members main record
+		 *
+		 * @param $username
+		 * @param $field
+		 * @param $data
+		 * @return bool
+		 */
 		function set_member_field($username, $field, $data)
 		{
 
@@ -174,6 +208,14 @@
 			return FALSE;
 		}
 
+		/**
+		 * Changes the value of a field in a members profile record
+		 *
+		 * @param $username
+		 * @param $field
+		 * @param $data
+		 * @return bool
+		 */
 		function set_profile_field($username, $field, $data)
 		{
 			$profile = $this->get_profile($username);
@@ -190,6 +232,12 @@
 			return FALSE;
 		}
 
+		/**
+		 * Find out how many times they have failed logging in
+		 *
+		 * @param $username
+		 * @return int
+		 */
 		function get_failed_login_count($username)
 		{
 			$this->load->model('logrus/member');
@@ -205,6 +253,11 @@
 			}
 		}
 
+		/**
+		 * Increase the count of how many times a member has failed logging in
+		 *
+		 * @param $username
+		 */
 		function increase_failed_count($username)
 		{
 			$this->load->model('logrus/member');
@@ -218,11 +271,32 @@
 			}
 		}
 
-		function validate_password($password, $hash)
+		/**
+		 * Check to see if a password is valid
+		 *
+		 * @param $username
+		 * @param $password
+		 * @return bool
+		 */
+		function validate_password($username, $password)
 		{
-			return $this->pbkdf2->validate_password($password, $hash);
+			$this->load->model('logrus/member');
+			$member = $this->get_member($username);
+			if ($member)
+			{
+				return $this->pbkdf2->validate_password($password, $member->hash);
+			}
+
+			return FALSE;
 		}
 
+		/**
+		 * Set a members password hash
+		 *
+		 * @param $username
+		 * @param $password
+		 * @return bool
+		 */
 		function set_password($username, $password)
 		{
 			$this->load->model('logrus/member');

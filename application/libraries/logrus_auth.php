@@ -184,7 +184,7 @@
 				}
 				else
 				{
-					if ($this->password->validate_password($password, $member->hash))
+					if ($this->password->validate_password($member->email, $password))
 					{
 						$this->message = 'Logged in';
 						$success       = TRUE;
@@ -408,17 +408,7 @@
 
 		function password_matches($username, $password)
 		{
-			$member = $this->password->get_member($username);
-			if ($member)
-			{
-				return $this->password->validate_password($password, $member->hash);
-			}
-			else
-			{
-				$this->message = 'Member not found';
-
-				return FALSE;
-			}
+			return $this->password->validate_password($username, $password);
 		}
 
 
