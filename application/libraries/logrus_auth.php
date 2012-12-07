@@ -226,7 +226,7 @@
 				$this->session->unset_userdata($this->session_id);
 				if ($member)
 				{
-					$this->password->increase_fail_count($member->email);
+					$this->password->increase_failed_count($member->email);
 				}
 
 				return FALSE;
@@ -421,7 +421,10 @@
 		 */
 		function set_password($username, $password)
 		{
-			return $this->password->set_password($username, $password);
+			$this->message = '';
+
+			$response = $this->password->set_password($username, $password);
+			return $response;
 		}
 
 		/**
@@ -436,7 +439,13 @@
 			$code = $this->valid_reset_code($reset_code);
 			if ($code)
 			{
-				return $this->set_password($code->username, $password);
+				$success = $this->set_password($code->username, $password);
+				if ($success)
+				{
+					$this->load->model('logrus/password_resets');
+					$this->password_resets->delete_by('reset_code', $reset_code);
+				}
+				return $success;
 			}
 
 			return FALSE;
@@ -666,9 +675,13 @@
 
 		function create_member($username, $name)
 		{
+			$this->message = '';
 			$username = $this->prep_username($username);
 			$result   = $this->password->create_member($username, $name);
-
+			if (! $result)
+			{
+				$this->message = 'Failed to create account';
+			}
 			return $result;
 		}
 

@@ -179,7 +179,8 @@
 
 				if (!$this->logrus_auth->login($email, $variables['password'], FALSE))
 				{
-					$message = $this->msg->error('email address or password did not match our records.');
+					$message = $this->msg->error('The email address or password did not match our records.');
+					$message .= anchor($this->config->item('auth_login_url'), 'Log in');
 				}
 				// no else, we redirected if successful login
 			}
@@ -278,7 +279,9 @@
 					}
 					else
 					{
-						if ($this->logrus_auth->create_member($email, $variables['display_name']))
+
+						$create = $this->logrus_auth->create_member($email, $variables['display_name']);
+						if ($create)
 						{
 							$member = $this->logrus_auth->get_member($email);
 							$this->logrus_auth->set_password($email, $variables['password']);
@@ -287,7 +290,7 @@
 						}
 						else
 						{
-							$message = '<span class="label label-important">Error</span> a problem occured trying to create your account.  Please try again in a few minutes.';
+							$message = $this->msg->error('A problem occured while trying to create your account: %s. <br/>Please try again in a few minutes', $this->logrus_auth->message);
 						}
 					}
 				}
@@ -449,15 +452,17 @@
 
 		function password_reset($reset_code = 'none')
 		{
-			if ($reset_code == 'none')
+			$this->load->library('logrus_auth');
+			$is_ajax    = $this->input->is_ajax_request();
+
+			if (! $this->logrus_auth->valid_reset_code($reset_code))
 			{
-				$message = $this->msg->error('Invalid reset code.  Please copy the whole url from your email.');
+				$message = $this->msg->error('Invalid reset code.  You can generate a password reset request <a href="%s">here</a>', $this->config->item('auth_reset_url'));
 			}
 			else
 			{
-				$this->load->library('logrus_auth');
+
 				$this->load->library('form_validation');
-				$is_ajax    = $this->input->is_ajax_request();
 				$ajax_error = FALSE;
 
 				$rules[] = array(
