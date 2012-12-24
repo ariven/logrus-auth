@@ -265,6 +265,21 @@
 			if ($username)
 			{
 				$this->member = $this->password->get_member($username);
+				
+				$this->load->model('logrus/member_groups');
+				$this->load->model('logrus/groups');
+				$member_groups = $this->ci->member_groups->get_many_by('member_id', $this->member->id);
+				if ($member_groups)
+				{
+					foreach ($member_groups as $m_group)
+					{
+						$group = $this->groups->get($m_group->group_id);
+						if ($group)
+						{
+							$this->member_groups[] = $group->tag;
+						}
+					}
+				}
 			}
 
 			return $this->member;
