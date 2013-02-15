@@ -1,718 +1,515 @@
-<?php if (!defined('BASEPATH'))
+<?php
+/**
+ * User: patrick
+ * Date: 1/30/13
+ * Time: 9:18 AM
+ *
+ */
+
+class Auth extends CI_Controller
 {
-	exit('No direct script access allowed');
-}
 
-	class Auth extends MY_Controller
+	protected $data; // used on some forms
+
+	public function __construct()
 	{
+		parent::__construct();
+		$this->config->load('logrus_auth');
+		$this->load->library('logrus/logrus_auth');
+		$this->load->helper('url');
 
-		protected $verify_url;
+	}
 
-		/**
-		 * constructor
-		 */
-		function __construct()
+	public function index()
+	{
+		redirect($this->config->item('auth_login_url')); // we don't allow direct access to here by default
+	}
+
+	/**
+	 * uses Phil Sturgeons OAuth2 library https://github.com/philsturgeon/codeigniter-oauth2  You will need it to
+	 * enact the oauth2 implementation in logrus_auth
+	 *
+	 * @param bool $provider
+	 */
+	public function oauth2_session($provider_name = FALSE)
+	{
+		if (! $provider_name)
 		{
-			parent::__construct();
-
-			$this->config->load('logrus_auth');
-			$this->load->library('logrus_auth');
-			$this->load->library('msg');
+			redirect($this->config->item('auth_login_url'));
 		}
+		$this->load->library('oauth2'); // uses Phil Sturgeons OAuth2 library https://github.com/philsturgeon/codeigniter-oauth2
+		$auth_access   = $this->config->item('auth_access');
+		$client_id     = $auth_access[$provider_name]['client_id'];
+		$client_secret = $auth_access[$provider_name]['client_secret'];
 
-		function index()
+		$provider = $this->oauth2->provider($provider_name, array('id' => $client_id, 'secret' => $client_secret));
+
+		if ($auth_access[$provider_name]['enabled'])
 		{
-			$this->load->helper('url');
-			redirect('/');
-		}
-
-		function oauth2_session($provider = 'select')
-		{
-
-			$this->layout = FALSE;
-			$this->view   = FALSE;
-
-			if ($provider == 'select')
-			{
-				redirect('/auth/login');
-			}
-			$this->load->library('logrus_auth');
-			$who = $provider;
-
-			$this->load->helper('url');
-			$this->load->library('oauth2');
-			$auth_access   = $this->config->item('auth_access');
-			$client_id     = $auth_access[$who]['client_id'];
-			$client_secret = $auth_access[$who]['client_secret'];
-
-			$provider = $this->oauth2->provider($provider, array(
-																'id'     => $client_id,
-																'secret' => $client_secret
-														   ));
-
-			if (!$this->input->get('code'))
-			{
-				$provider->authorize();
-			}
-			else
+			if ($this->input->get('code'))
 			{
 				try
 				{
-					$token = $provider->access($_GET['code']);
+					$token = $provider->access($this->input->get('code'));
 					$user  = $provider->get_user_info($token);
-					// log him in, if not a member, and auth_open_enrollment, create account.
-					$this->logrus_auth->oauth2_member_login($provider->name, $token, $user);
+					// log him in, if not a member and if auth_open_enrollment, create account
+					$result = $this->logrus_auth->oauth2_member_login($provider->name, $token, $user);
+					if (! $result)
+					{
+						$this->load->view('logrus/auth/oauth2_login_failed',
+										  array('message' => $this->logrus_auth->message));
+					}
+					// no more work after if, since it redirects by default
 				} catch (OAuth2_Exception $e)
 				{
-					show_error('That didnt work ' . $e);
+					$this->load->view('logrus/auth/oauth2_login_failed',
+									  array('message' => 'Unable to log you in at this time'));
 				}
 			}
-		}
-
-		/**
-		 * so sorry, not for you.
-		 */
-		function site_closed()
-		{
-
-		}
-
-		/**
-		 * Receives a POST with parameter email to check if a user is registered, returns json response
-		 */
-		function ajax_email_exists()
-		{
-			$this->layout = FALSE;
-			$this->view   = FALSE;
-
-			$email  = strtolower(trim($this->input->post('email')));
-			$member = $this->logrus_auth->member_exists($email);
-
-			if ($member)
-			{
-				$response['registered'] = TRUE;
-			}
 			else
 			{
-				$response['registered'] = FALSE;
+				$provider->authorize();
 			}
-			echo json_encode($response);
+		}
+		else
+		{
+			$this->load->view('logrus/auth/oauth2_not_enabled');
+		}
+	}
+
+	/**
+	 * so sorry, not for you
+	 */
+	public function site_closed()
+	{
+		$this->load->view('logrus/auth/site_closed');
+	}
+
+	/**
+	 * Logs in the member.
+	 * Also, if you want to use the javascript functionality, there is a script at /assets/js/logrus/auth/login.js
+	 */
+	function login()
+	{
+		$this->load->library('form_validation');
+		$is_ajax = $this->input->is_ajax_request();
+
+		$this->data['open_enrollment'] = $this->config->item('auth_open_enrollment');
+		$this->data['use_oauth2']      = $this->config->item('auth_use_oath2');
+
+		$var               = new stdClass(); // Can put database object here with = clone $db_object;
+		$var->email        = html_purify($this->input->post('email'));
+		$var->password     = html_purify($this->input->post('password'));
+		$this->data['var'] = $var;
+
+		$rules[] = array('field' => 'email', 'label' => 'Email Address', 'rules' => 'trim|required|strtolower');
+		$rules[] = array('field' => 'password', 'label' => 'Your password', 'rules' => 'required');
+		$this->form_validation->set_rules($rules);
+
+		if ($this->form_validation->run() == FALSE)
+		{
+			// first load or failed form
+			$error           = new stdClass();
+			$error->email    = form_error('email');
+			$error->password = form_error('password');
+
+			$this->data['errors'] = $error;
+			$errors               = validation_errors();
+			if (trim($errors))
+			{
+				$this->data['status'] = $errors;
+			}
+			$message = $this->load->view('logrus/auth/login_form', $this->data, TRUE);
+		}
+		else
+		{
+			if (! $this->logrus_auth->login_with_redirect($var->email, $var->password))
+			{
+				$message = $this->load->view('logrus/auth/failed_login', array('message' => $this->logrus_auth->message), TRUE);
+			}
+			// no else, we are redirected if we log in
 		}
 
-		/**
-		 * handles an ajax login POST request.  returns json response
-		 */
-		function ajax_login()
+		if ($is_ajax)
 		{
-			$this->layout = FALSE;
-			$this->view   = FALSE;
-
-			$this->load->model('logrus/member');
-			$this->load->library('logrus_auth');
-
-			$email    = strtolower(trim($this->input->post('email', TRUE)));
-			$password = $this->input->post('password');
-
-			if ($this->logrus_auth->login($email, $password, TRUE))
-			{
-				$response['status'] = 'OK';
-			}
-			else
-			{
-				$response['status'] = 'credentialsError';
-			}
-			echo json_encode($response);
+			// set header to json type
+			header('Cache-Control: no-cache, must-revalidate');
+			header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+			header('Content-type: application/json');
+			// if you don't have $this->set_response() use the previous 3 lines
+			//$this->set_response('json');
+			echo json_encode($this->data);
+		}
+		else
+		{
+			// $this->add_script('/assets/js/logrus/auth/login.js');
 		}
 
-		function login()
+		echo $message;
+	}
+
+
+	function logout()
+	{
+		$this->logrus_auth->logout();
+	}
+
+	/**
+	 * Allows new members to sign up.  We send an email with password reset link in it so that we can confirm their
+	 * email address
+	 */
+	function signup()
+	{
+		$this->load->library('form_validation');
+
+		$is_ajax = $this->input->is_ajax_request();
+
+		$message = '';
+
+		if ($this->config->item('auth_open_enrollment'))
 		{
-			$this->load->library('form_validation');
-			$this->load->config('logrus_auth');
+			$var               = new stdClass(); // Can put database object here with = clone $db_object;
+			$var->email        = html_purify($this->input->post('email'));
+			$var->display_name = html_purify($this->input->post('display_name'));
+			$this->data['var'] = $var;
 
-			$variables['auth_open_enrollment'] = $this->config->item('auth_open_enrollment');
-			$variables['auth_use_oauth2']      = $this->config->item('auth_use_oauth2');
-
-			$is_ajax    = $this->input->is_ajax_request();
-			$ajax_error = FALSE;
-			$success    = TRUE;
-
-			$rules[] = array(
-				'field' => 'email',
-				'label' => 'Email Address',
-				'rules' => 'trim|required'
-			);
-			$rules[] = array(
-				'field' => 'password',
-				'label' => 'Password',
-				'rules' => 'required'
-			);
-
-			// load any variables to refill the form
-			$variables['email']    = $this->input->post('email', TRUE);
-			$variables['password'] = $this->input->post('password', TRUE);
-
+			$rules[] = array('field' => 'email', 'label' => 'Email Address', 'rules' => 'trim|required|strtolower|is_unique[members.email]');
+			$rules[] = array('field' => 'display_name', 'label' => 'Your name', 'rules' => 'trim|required');
 			$this->form_validation->set_rules($rules);
+
 			if ($this->form_validation->run() == FALSE)
 			{
 				// first load or failed form
-				$error              = array(
-					'email'    => form_error('email'),
-					'password' => form_error('password'),
-				);
-				$variables['error'] = $error;
-				if ($is_ajax)
+				$error               = new stdClass();
+				$error->email        = form_error('email');
+				$error->display_name = form_error('display_name');
+
+				$this->data['errors'] = $error;
+				$errors               = validation_errors();
+				if (trim($errors))
 				{
-					if (count($error) > 0)
-					{
-						$ajax_error = TRUE;
-					}
-					$message = $error;
+					$this->data['status'] = $errors;
 				}
-				else
-				{
-					$message = $this->load->view('auth/login', $variables, TRUE);
-				}
+				$message = $this->load->view('logrus/auth/signup_form', $this->data, TRUE);
 			}
 			else
 			{
-				$email = strtolower(trim($variables['email']));
+				$this->load->library('logrus/logrus_member');
 
-				if (!$this->logrus_auth->login($email, $variables['password'], FALSE))
+				$create = $this->logrus_member->create($var->email, $var->display_name);
+				if ($create)
 				{
-					$message = $this->msg->error('The email address or password did not match our records.');
-					$message .= anchor($this->config->item('auth_login_url'), 'Log in');
-				}
-				// no else, we redirected if successful login
-			}
-
-			if ($is_ajax)
-			{
-				$this->layout = FALSE;
-				$this->view   = FALSE;
-				if ($ajax_error)
-				{
-					echo json_encode($message);
+					$member = $this->logrus_member->get($var->email);
+					if ($member)
+					{
+						$this->load->library('logrus/logrus_password');
+						$this->logrus_password->generate_reset_code($var->email, 'new');
+					}
+					$message = $this->load->view('logrus/auth/created_account', '', TRUE);
 				}
 				else
 				{
-					echo json_encode(array('form_message' => $message));
+					$message = $this->load->view('logrus/auth/error_creating_account', '', TRUE);
 				}
-			}
-			else
-			{
-			}
-
-			$this->data['content'] = $message;
-			$this->view            = 'layouts/wrapper';
-		}
-
-		/**
-		 * signup to site
-		 */
-		function signup()
-		{
-			$this->load->library('form_validation');
-			$this->load->library('logrus_auth');
-
-			if ($this->config->item('auth_open_enrollment'))
-			{
-				$is_ajax    = $this->input->is_ajax_request();
-				$ajax_error = FALSE;
-
-				$rules[] = array(
-					'field' => 'email',
-					'label' => 'Email Address',
-					'rules' => 'trim|required|valid_email'
-				);
-				$rules[] = array(
-					'field' => 'display_name',
-					'label' => 'Display Name',
-					'rules' => 'trim'
-				);
-				$rules[] = array(
-					'field' => 'password',
-					'label' => 'Password',
-					'rules' => 'required'
-				);
-				$rules[] = array(
-					'field' => 'confirm',
-					'label' => 'Confirm your password',
-					'rules' => 'required|matches[password]'
-				);
-
-				// load any variables to refill the form
-				$variables['email']        = $this->input->get_post('email', TRUE);
-				$variables['password']     = $this->input->post('password', TRUE);
-				$variables['confirm']      = $this->input->post('confirm', TRUE);
-				$variables['display_name'] = $this->input->post('display_name', TRUE);
-
-				$this->form_validation->set_rules($rules);
-				if ($this->form_validation->run() == FALSE)
-				{
-					// first load or failed form
-					$error              = array(
-						'email'        => form_error('email'),
-						'password'     => form_error('password'),
-						'display_name' => form_error('display_name'),
-					);
-					$variables['error'] = $error;
-					if ($is_ajax)
-					{
-						if (count($error) > 0)
-						{
-							$ajax_error = TRUE;
-						}
-						$message = $error;
-					}
-					else
-					{
-						$message = $this->load->view('auth/signup_form', $variables, TRUE);
-					}
-				}
-				else
-				{
-					$email        = strtolower(trim($variables['email']));
-					$member_check = $this->logrus_auth->get_member($email);
-					if ($member_check)
-					{
-						$message = '<span class="label label-important">Error</span> an account already exists with that email address.  Did you want to <a href="/auth/reset_password">Reset your password</a> isntead?';
-					}
-					else
-					{
-
-						$create = $this->logrus_auth->create_member($email, $variables['display_name']);
-						if ($create)
-						{
-							$member = $this->logrus_auth->get_member($email);
-							$this->logrus_auth->set_password($email, $variables['password']);
-							$this->logrus_auth->reset_password($member->id, 'new'); // send new email
-							$message = $this->load->view('auth/signup_completed', '', TRUE);
-						}
-						else
-						{
-							$message = $this->msg->error('A problem occured while trying to create your account: %s. <br/>Please try again in a few minutes', $this->logrus_auth->message);
-						}
-					}
-				}
-			}
-			else
-			{
-				$message = '<span class="label label-important">Error</span> This site is closed for enrollment.  All accounts must be created by the administrators.';
-			}
-			// this is where you display results.  javascript version or full template version
-			if ($is_ajax)
-			{
-				if ($ajax_error)
-				{
-					echo json_encode($message);
-				}
-				else
-				{
-					echo json_encode(array('form_message' => $message));
-				}
-			}
-			else
-			{
-				$this->data['content'] = $message;
-				$this->view            = 'layouts/wrapper';
-
-				// $this->data['javascript'][] = 'cookie.js'; // if you want to use CSRF use the https://github.com/carhartl/jquery-cookie plugin
-				$this->data['javascript'][] = 'auth/signup_form.js';
 			}
 		}
-
-		/**
-		 * handles confirming a valid email address for people who want to have a native account
-		 *
-		 * @param $confirm_code
-		 */
-		function confirm_email_code($confirm_code)
+		else
 		{
-			$code = $this->logrus_auth->valid_reset_code($confirm_code);
+			$message = $this->load->view('logrus/auth/site_closed', '', TRUE);
+		}
+
+		if ($is_ajax)
+		{
+			// set header to json type
+			header('Cache-Control: no-cache, must-revalidate');
+			header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+			header('Content-type: application/json');
+			// if you don't have $this->set_response() use the previous 3 lines
+			// $this->set_response('json');
+			echo json_encode($this->data);
+		}
+		else
+		{
+			// $this->add_script('assets/js/logrus/auth/signup.js');
+		}
+		echo $message;
+	}
+
+	public function confirm_email_code($confirm)
+	{
+		$this->load->library('logrus/logrus_password');
+		$code = $this->logrus_password->get_reset_code($confirm);
+		if ($code and $this->logrus_password->validate_reset_code($code->member_id, $confirm))
+		{
+			$this->load->library('logrus/logrus_member');
+			$member = $this->logrus_member->get_by_field('id', $code->member_id);
+			$update = $this->logrus_member->set_field($member->email, 'email_confirmed', 1);
+			if ($update)
+			{
+				$message = $this->load->view('logrus/auth/email_confirmed');
+			}
+			else
+			{
+				$message = $this->load->view('logrus/auth/error_confirming_email');
+			}
+		}
+		else
+		{
 			if ($code)
 			{
-				if ($this->logrus_auth->update_member_field($code->username, 'email_confirmed', 1))
-				{
-					$message = $this->load->view('auth/email_was_confirmed', '', TRUE);
-				}
-				else
-				{
-					$message = $this->msg->error('There was an error on our end confirming your email address.  Please try again later');
-				}
+				$message = $this->load->view('logrus/auth/expired_code');
 			}
 			else
 			{
-				$message = $this->load->view('auth/email_not_confirmed', '', TRUE);
-			}
-			$this->data['content'] = $message;
-			$this->view            = 'layouts/wrapper';
-		}
-
-		/**
-		 * confirms email address
-		 */
-		function confirm_email()
-		{
-			$this->load->library('logrus_auth');
-			$is_ajax    = $this->input->is_ajax_request();
-			$ajax_error = FALSE;
-
-			if (!$this->logrus_auth->logged_in())
-			{
-				$message = '<h3>Please log in before initiating confirmation request.</h3>';
-			}
-			else
-			{
-				$this->load->library('form_validation');
-
-				$rules[] = array(
-					'field' => 'confirm',
-					'label' => 'Confirm',
-					'rules' => 'trim|required'
-				);
-
-				// load any variables to refill the form
-				$variables['confirm'] = $this->input->post('confirm', TRUE);
-				$this->form_validation->set_rules($rules);
-				if ($this->form_validation->run() == FALSE)
-				{
-					// first load or failed form
-					$error              = array('confirm' => form_error('confirm'));
-					$variables['error'] = $error;
-					if ($is_ajax)
-					{
-						if (count($error) > 0)
-						{
-							$ajax_error = TRUE;
-						}
-						$message = $error;
-					}
-					else
-					{
-						$message = $this->load->view('auth/confirm_email', $variables, TRUE);
-					}
-				}
-				else
-				{
-					if ($variables['confirm'] == 'yes')
-					{
-						if ($this->logrus_auth->member)
-						{
-							$this->logrus_auth->reset_password(
-								$this->logrus_auth->member->id,
-								'confirm_email'
-							);
-							$message = '<h3>We have sent a confirmation email to your email address. Please follow instructions in the email to finish validating your email address</h3>';
-						}
-						else
-						{
-							$message = '<h3>Please log in before initiating confirmation request.</h3>';
-						}
-
-					}
-				}
-			}
-
-			if ($is_ajax)
-			{
-				$this->view   = FALSE;
-				$this->layout = FALSE;
-
-				if ($ajax_error)
-				{
-					echo json_encode($message);
-				}
-				else
-				{
-					echo json_encode(array('form_message' => $message));
-				}
-			}
-			else
-			{
-				$this->data['javascript'][] = 'auth/confirm_email.js';
-
-				$this->data['content'] = $message;
-				$this->view            = 'layouts/wrapper';
+				$message = $this->load->view('logrus/auth/invalid_code');
 			}
 		}
 
-		/**
-		 * logout of the site.  Redirects to url in logrus_auth config for logged out users
-		 */
-		function logout()
+		echo $message;
+	}
+
+	/**
+	 * initiates an email confirmation request
+	 */
+	public function confirm_email()
+	{
+		if (! $this->logrus_auth->logged_in())
 		{
-			$this->load->library('logrus_auth');
-			$this->logrus_auth->log_out();
+			$message = $this->load->view('logrus/auth/must_be_logged_in', '', TRUE);
 		}
-
-
-		// //////////////////////////////////////////////////////////////////////
-		// //  password management  /////////////////////////////////////////////
-		// //////////////////////////////////////////////////////////////////////
-
-		function password_reset($reset_code = 'none')
+		else
 		{
-			$this->load->library('logrus_auth');
-			$is_ajax    = $this->input->is_ajax_request();
-
-			if (! $this->logrus_auth->valid_reset_code($reset_code))
-			{
-				$message = $this->msg->error('Invalid reset code.  You can generate a password reset request <a href="%s">here</a>', $this->config->item('auth_reset_url'));
-			}
-			else
-			{
-
-				$this->load->library('form_validation');
-				$ajax_error = FALSE;
-
-				$rules[] = array(
-					'field' => 'password',
-					'label' => 'New password',
-					'rules' => 'required'
-				);
-				$rules[] = array(
-					'field' => 'confirm',
-					'label' => 'Confirm new password',
-					'rules' => 'required'
-				);
-
-				$variables['code']     = $reset_code;
-				$variables['password'] = $this->input->post('password', TRUE);
-				$variables['confirm']  = $this->input->post('confirm', TRUE);
-
-				$this->form_validation->set_rules($rules);
-				if ($this->form_validation->run() == FALSE)
-				{
-					// first load or failed form
-					$error              = array(
-						'password' => form_error('password'),
-						'confirm'  => form_error('confirm'),
-					);
-					$variables['error'] = $error;
-					if ($is_ajax)
-					{
-						if (count($error) > 0)
-						{
-							$ajax_error = TRUE;
-						}
-						$message = $error;
-					}
-					else
-					{
-						$message = $this->load->view('auth/password_reset', $variables, TRUE);
-					}
-				}
-				else
-				{
-					if ($this->logrus_auth->validate_and_set_password($reset_code, $variables['password']))
-					{
-						$message = $this->msg->info('Your password has been reset.  <a href="/auth/login">Login Here</a>');
-					}
-					else
-					{
-						$message = sprintf('There was a problem resetting your password. (%s) <a href="/auth/reset_password">Try again?</a>',
-										   $this->logrus_auth->message);
-					}
-				}
-			}
-
-
-			if ($is_ajax)
-			{
-				$this->layout = FALSE;
-				$this->view   = FALSE;
-
-				if ($ajax_error)
-				{
-					echo json_encode($message);
-				}
-				else
-				{
-					echo json_encode(array('form_message' => $message));
-				}
-			}
-			else
-			{
-				$this->data['javascript'][] = 'auth/password_reset.js';
-				$this->data['content']      = $message;
-				$this->view                 = 'layouts/wrapper';
-			}
-		}
-
-		function reset_password()
-		{
-			$this->load->library('form_validation');
-			$this->load->model('logrus/member');
-			$this->load->library('logrus_auth');
-
-			$is_ajax    = $this->input->is_ajax_request();
-			$ajax_error = FALSE;
-
-			$rules[] = array(
-				'field' => 'email',
-				'label' => 'Your Email Address',
-				'rules' => 'trim|required'
+			$this->load->library('logrus/logrus_password');
+			print_r($this->logrus_auth->member);
+			$this->logrus_password->generate_reset_code(
+				$this->logrus_auth->member->email,
+				'confirm_email'
 			);
+			$message = $this->load->view('logrus/auth/reset_code_sent', '', TRUE);
+		}
 
-			$variables['email'] = $this->input->post('email', TRUE);
+		echo $message;
+	}
 
+	public function reset_password()
+	{
+		$this->load->library('form_validation');
+		$is_ajax = $this->input->is_ajax_request();
+
+		$var               = new stdClass(); // Can put database object here with = clone $db_object;
+		$var->email        = html_purify($this->input->post('email'));
+		$this->data['var'] = $var;
+
+		$rules[] = array('field' => 'email', 'label' => 'Your email address', 'rules' => 'trim|required|strtolower');
+		$this->form_validation->set_rules($rules);
+
+		if ($this->form_validation->run() == FALSE)
+		{
+			// first load or failed form
+			$error        = new stdClass();
+			$error->email = form_error('email');
+
+			$this->data['errors'] = $error;
+			$errors               = validation_errors();
+			if (trim($errors))
+			{
+				$this->data['status'] = $errors;
+			}
+			$message = $this->load->view('logrus/auth/reset_password', $this->data, TRUE);
+		}
+		else
+		{
+			$this->load->library('logrus/logrus_member');
+			$member = $this->logrus_member->get($var->email);
+			if ($member)
+			{
+				$this->load->library('logrus/logrus_password');
+				$this->logrus_password->generate_reset_code($var->email);
+			}
+			$message = $this->load->view('logrus/auth/reset_code_sent', '', TRUE);
+		}
+
+		if ($is_ajax)
+		{
+
+			// set header to json type
+			header('Cache-Control: no-cache, must-revalidate');
+			header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+			header('Content-type: application/json');
+			// if you don't have $this->set_response() use the previous 3 lines
+			//$this->set_response('json');
+			echo json_encode($this->data);
+		}
+		else
+		{
+			// $this->add_script('assets/js/logrus/auth/reset_password.js');
+		}
+		echo $message;
+	}
+
+
+	public function password_reset($confirm)
+	{
+		$this->load->library('form_validation');
+		$is_ajax = $this->input->is_ajax_request();
+
+		$this->load->library('logrus/logrus_password');
+		$this->load->library('logrus/logrus_member');
+		$code = $this->logrus_password->get_reset_code($confirm);
+		if ($code and $this->logrus_password->validate_reset_code($code->member_id, $confirm))
+		{
+			$var               = new stdClass(); // Can put database object here with = clone $db_object;
+			$var->password     = html_purify($this->input->post('password'));
+			$var->confirm      = html_purify($this->input->post('confirm'));
+			$this->data['var'] = $var;
+
+			$rules[] = array('field' => 'password', 'label' => 'Password', 'rules' => 'required');
+			$rules[] = array('field' => 'confirm', 'label' => 'Confirm your password', 'rules' => 'required|matches[password]');
 			$this->form_validation->set_rules($rules);
+
 			if ($this->form_validation->run() == FALSE)
 			{
+				// first load or failed form
+				$error           = new stdClass();
+				$error->password = form_error('password');
+				$error->confirm  = form_error('confirm');
 
-				$error              = array(
-					'email' => form_error('email'),
-				);
-				$variables['error'] = $error;
-				if ($is_ajax)
+				$this->data['errors'] = $error;
+				$errors               = validation_errors();
+				if (trim($errors))
 				{
-					if (count($error) > 0)
-					{
-						$ajax_error = TRUE;
-					}
-					$message = $error;
+					$this->data['status'] = $this->msg->error($errors);
 				}
-				else
-				{
-					$message = $this->load->view('auth/reset_password', $variables, TRUE);
-				}
+				$message = $this->load->view('logrus/auth/password_reset', $this->data, TRUE);
 			}
 			else
 			{
-				$email  = strtolower(trim($variables['email']));
-				$member = $this->member->get_by('email', $email);
+				$member = $this->logrus_member->get_by_field('id', $code->member_id);
 				if ($member)
 				{
-					$this->logrus_auth->reset_password($member->id, 'reset');
-					$message = $this->msg->info('Please check your email for a password reset email from us with further instructions');
+					$success = $this->logrus_password->set_password_with_reset($member->email, $confirm,
+																				$var->password);
+					if ($success)
+					{
+						$message = $this->load->view('logrus/auth/reset_password_changed', '', TRUE);
+					}
+					else
+					{
+						$message = $this->load->view('logrus/auth/reset_password_not_changed', '', TRUE);
+					}
 				}
 				else
 				{
-					$message = $this->msg->block('Please check your email for a password reset email from us with further instructions.');
+					$message = $this->load->view('logrus/auth/error_loading_account', '', TRUE);
 				}
 			}
-
-			if ($is_ajax)
-			{
-				$this->layout = FALSE;
-				$this->view   = FALSE;
-				if ($ajax_error)
-				{
-					echo json_encode($message);
-				}
-				else
-				{
-					echo json_encode(array('form_message' => $message));
-				}
-			}
-			else
-			{
-				$this->data['javascript'][] = 'auth/reset_password.js';
-
-				$this->data['content'] = $message;
-				$this->view            = 'layouts/wrapper';
-			}
-
 		}
-
-		/**
-		 * allows the user to change their password.  They must be logged in.
-		 */
-		function change_password()
+		else
 		{
-			if (!$this->logrus_auth->logged_in())
+			if ($code)
 			{
-				$message = '<h3>You must be logged in to change your password.</h3><a href="/auth/login">Log in here</a>';
+				$message = $this->load->view('logrus/auth/expired_code');
 			}
 			else
 			{
-				$this->load->library('form_validation');
-				$is_ajax    = $this->input->is_ajax_request();
-				$ajax_error = FALSE;
+				$message = $this->load->view('logrus/auth/invalid_code');
+			}
+		}
 
-				$rules[] = array(
-					'field' => 'password',
-					'label' => 'Current Password',
-					'rules' => 'required'
-				);
-				$rules[] = array(
-					'field' => 'new_password',
-					'label' => 'New Password',
-					'rules' => 'trim|required|min_length[6]'
-				);
-				$rules[] = array(
-					'field' => 'confirm_password',
-					'label' => 'Confirm new password',
-					'rules' => 'trim|required|matches[new_password]'
-				);
 
-				// load any variables to refill the form
-				$variables['password']         = $this->input->post('password', TRUE);
-				$variables['new_password']     = $this->input->post('new_password', TRUE);
-				$variables['confirm_password'] = $this->input->post('confirm_password', TRUE);
+		if ($is_ajax)
+		{
+			$this->view = FALSE; // disable view for json
+			// set header to json type
+			header('Cache-Control: no-cache, must-revalidate');
+			header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+			header('Content-type: application/json');
+			// if you don't have $this->set_response() use the previous 3 lines
+			// $this->set_response('json');
+			echo json_encode($this->data);
+		}
+		else
+		{
+			//$this->add_script('/assets/js/logrus/auth/password_reset.js');
+		}
+		echo $message;
+	}
 
-				$this->form_validation->set_rules($rules);
-				if ($this->form_validation->run() == FALSE)
+	public function change_password()
+	{
+		if (! $this->logrus_auth->logged_in())
+		{
+			$message = $this->load->view('logrus/auth/must_be_logged_in', '', TRUE);
+		}
+		else
+		{
+			$this->load->library('form_validation');
+			$is_ajax = $this->input->is_ajax_request();
+
+			$var                   = new stdClass(); // Can put database object here with = clone $db_object;
+			$var->current_password = html_purify($this->input->post('current_password'));
+			$var->new_password     = html_purify($this->input->post('new_password'));
+			$var->confirm_password = html_purify($this->input->post('confirm_password'));
+			$this->data['var']     = $var;
+
+			$rules[] = array('field' => 'current_password', 'label' => 'Current Password', 'rules' => 'required');
+			$rules[] = array('field' => 'new_password', 'label' => 'New password', 'rules' => 'required');
+			$rules[] = array('field' => 'confirm_password', 'label' => 'Confirm your new password', 'rules' => 'required|matches[new_password]');
+			$this->form_validation->set_rules($rules);
+
+			if ($this->form_validation->run() == FALSE)
+			{
+				// first load or failed form
+				$error                   = new stdClass();
+				$error->current_password = form_error('current_password');
+				$error->new_password     = form_error('new_password');
+				$error->confirm_password = form_error('confirm_password');
+
+				$this->data['errors'] = $error;
+				$errors               = validation_errors();
+				if (trim($errors))
 				{
-					$error              = array(
-						'password'         => form_error('password'),
-						'new_password'     => form_error('new_password'),
-						'confirm_password' => form_error('confirm_password'),
-					);
-					$variables['error'] = $error;
-					if ($is_ajax)
+					$this->data['status'] = $this->msg->error($errors);
+				}
+				$message = $this->load->view('logrus/auth/change_password', $this->data, TRUE);
+			}
+			else
+			{
+				$this->load->library('logrus/logrus_password');
+				if ($this->logrus_password->validate($this->logrus_auth->member->email, $var->password))
+				{
+					if ($this->logrus_password->set_password($this->logrus_auth->member->email, $var->new_password))
 					{
-						if (count($error) > 0)
-						{
-							$ajax_error = TRUE;
-						}
-						$message = $error;
+						$message = $this->load->view('logrus/auth/password_successfully_changed', '', TRUE);
 					}
 					else
 					{
-						$message = $this->load->view('auth/change_password', $variables, TRUE);
+						$message = $this->load->view('logrus/auth/password_unsuccessfully_changed', '', TRUE);
 					}
 				}
 				else
 				{
-					$member = $this->logrus_auth->member;
-					if ($this->logrus_auth->password_matches($member->id, $variables['password']))
-					{
-						if ($this->logrus_auth->set_password($member->id, $variables['new_password']))
-						{
-							$message = 'You have just successfully changed your password.';
-						}
-						else
-						{
-							$message = 'There was a problem saving your password.  Please try again.';
-						}
-
-					}
-					else
-					{
-						$message = 'You need to enter your correct original password to change your password.';
-						$message .= $this->load->view('auth/change_password', $variables, TRUE);
-					}
+					$message = $this->load->view('logrus/auth/incorrect_password_for_change');
 				}
+				$this->data['message'] = 'You just successfully submitted this form!';
 			}
 
 			if ($is_ajax)
 			{
-				$this->layout = FALSE;
-				$this->view   = FALSE;
-				if ($ajax_error)
-				{
-					echo json_encode($message);
-				}
-				else
-				{
-					echo json_encode(array('form_message' => $message));
-				}
+				// set header to json type
+				header('Cache-Control: no-cache, must-revalidate');
+				header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+				header('Content-type: application/json');
+				// if you don't have $this->set_response() use the previous 3 lines
+				//$this->set_response('json');
+				echo json_encode($this->data);
 			}
 			else
 			{
-				$this->data['content'] = $message;
-				$this->view            = 'layouts/wrapper';
+				//$this->add_script('assets/js/logrus/auth/change_password.js');
 			}
 		}
+		echo $message;
 	}
+
+}
