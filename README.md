@@ -71,6 +71,8 @@ Redesigned the library
 * Created install function, this will create the logrus_auth.php config file for you, and create tables in the current default MYSQL database
 
 ==================================================================================
+Older changes
+
 - Added Basic oauth2 support for Gmail, Windows Live and Facebook authentication.
 Be warned, only allow Facebook logins if you feel that you can trust them as an authority on the email address, because
 they are not an email address provider like windows live and gmail are.  This means that in theory someone could
