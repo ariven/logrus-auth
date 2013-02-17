@@ -30,10 +30,20 @@ It uses a primitive notification library for emailling password resets and simil
 I included a small gravatar grabber helper. (whole 1 line function :) ) that is used to grab a profile
 picture/avatar for the member
 
-Included is sql for mysql.
+Included is sql for mysql, though the installer script will create the tables for you
 
 I will update this with better documentation when I get a chance, but for now check the controllers/auth.php
 file to see how I use it.
+
+Installation
+------------
+1. Install 2.x version of Codeigniter
+2. Install the [Jamie Rumbelow base model](https://github.com/jamierumbelow/codeigniter-base-model) in your Core directory
+3. Copy all files from logrus_auth to the appropriate directories in your install, take care with the .htaccess file, this is the one that I use to remove the index.php from being part of the url... in theory stuff will work without it, but thats how I have mine set up by default
+4. configure a default mysql database
+5. turn on sessions and database in autoload autoload
+6. go to your domain/logrus_install/install to initialize the configuration for logrus_auth
+7. if you want to use the oauth2 functions, you will need to install [Phil Sturgeon's oauth2 library](https://github.com/philsturgeon/codeigniter-oauth2)
 
 Security
 --------
@@ -46,8 +56,10 @@ style passwords in your database, but you can increase the iterations and change
 The current way that the sessions work, is single log in.  If you log in somewhere else, it may log you out
 of the first session.  This is on my @todo list to change at a later date.
 
-Currently it should support the config option to not allow creation of account when an unknown oauth2 person tries to log in.
 
+
+Oauth2
+------
 You will need to register with google, facebook and windows live to get the client id and secret keys to use
 
 these should get you started down the garden path:
